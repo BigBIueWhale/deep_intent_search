@@ -248,7 +248,7 @@ def run_search_pass(
 
 def display_results(relevant_chunks: List[Chunk]):
     """
-    Prints the content of the relevant chunks to the console.
+    Prints the filenames of the relevant chunks to the console.
     """
     print("\n" + "="*80)
     print(f"Found {len(relevant_chunks)} relevant section(s):")
@@ -257,11 +257,10 @@ def display_results(relevant_chunks: List[Chunk]):
     if not relevant_chunks:
         print("No relevant sections were found for your query.")
         return
-
+    
+    # Only print the filename and token count, not the content.
     for chunk in relevant_chunks:
-        print(f"--- BEGIN: {chunk.filename} (Tokens: {chunk.token_count}) ---")
-        print(chunk.content)
-        print(f"--- END: {chunk.filename} ---\n")
+        print(f"- {chunk.filename} (Tokens: {chunk.token_count})")
 
 # --- Main Execution ---
 
@@ -307,9 +306,8 @@ def main():
         if not pass_results:
             print("\n" + "="*80)
             print("⚠️ Your query returned 0 results.")
-            print("   The search set has been reverted to the previous list of results.")
-            # Do not update active_results, just show the last successful set.
-            display_results(active_results)
+            print("   The search set remains unchanged from the previous pass.")
+            # Do not update active_results, allowing the next search to use the old set.
         else:
             # Update the active set to the new, narrower results.
             active_results = pass_results
