@@ -361,6 +361,19 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    output_dir = args.output_dir
+
+    # Check if the output directory already exists.
+    if os.path.exists(output_dir):
+        # Raising an error is more Pythonic and provides a clearer traceback.
+        raise FileExistsError(
+            f"Output directory '{output_dir}' already exists. "
+            "Please specify a new directory with --output-dir or remove the existing one."
+        )
+
+    # Create the output directory
+    os.makedirs(output_dir)
+
     all_chunks = []
     chunk_origins = []
 
@@ -385,19 +398,6 @@ if __name__ == "__main__":
     # --- Saving All Output Chunks ---
     if not all_chunks:
         print("\n--- No chunks were generated. ---")
-
-    output_dir = args.output_dir
-
-    # Check if the output directory already exists.
-    if os.path.exists(output_dir):
-        # Raising an error is more Pythonic and provides a clearer traceback.
-        raise FileExistsError(
-            f"Output directory '{output_dir}' already exists. "
-            "Please specify a new directory with --output-dir or remove the existing one."
-        )
-
-    # Create the output directory
-    os.makedirs(output_dir)
 
     total_chunks = len(all_chunks)
     print(f"\n--- Completed: Split into {total_chunks} chunks across {len(args.file)} file(s) ---")
