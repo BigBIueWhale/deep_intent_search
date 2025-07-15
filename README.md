@@ -1,5 +1,5 @@
 # Deep Intent Search
-Search algorithm that rivals the accuracy of a human reading through an article and marking relevant sections with a yellow marker.
+Search algorithm that rivals the accuracy of a human reading through an article and highlighting relevant sections with a yellow marker
 
 ## Introduction
 
