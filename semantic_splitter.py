@@ -344,48 +344,64 @@ Full text:
 if __name__ == "__main__":
     # --- Command-Line Argument Parsing ---
     parser = argparse.ArgumentParser(
-        description="Split a large text file into smaller, semantically coherent chunks."
+        description="Split one or more large text files into smaller, semantically coherent chunks."
     )
     parser.add_argument(
         "--file", 
         type=str, 
-        required=True, 
-        help="Path to the input text file to be split."
+        required=True,
+        nargs='+',  # Accept one or more file arguments
+        help="Path(s) to the input text file(s) to be split."
     )
     args = parser.parse_args()
-    
-    input_filename = args.file
 
-    # --- File Processing ---
-    try:
-        with open(input_filename, "r", encoding="utf-8") as fr:
-            file_contents = fr.read()
-    except FileNotFoundError:
-        print(f"Error: The file '{input_filename}' was not found.")
-        exit(1)
+    all_chunks = []
+    chunk_origins = []
 
-    print(f"--- Splitting file: {input_filename} ---")
-    print(f"Original token count: {count_tokens(file_contents)}")
-    print(f"Max tokens per chunk: {MAX_TOKENS_PER_CHUNK}\n")
+    # --- File Processing Loop ---
+    for input_filename in args.file:
+        try:
+            with open(input_filename, "r", encoding="utf-8") as fr:
+                file_contents = fr.read()
+        except FileNotFoundError:
+            print(f"Error: The file '{input_filename}' was not found. Skipping.")
+            continue  # Skip to the next file in the list
 
-    # Call the main function to start the splitting process.
-    chunks = semantic_split(text=file_contents, filename=input_filename)
+        print(f"--- Splitting file: {input_filename} ---")
+        print(f"Original token count: {count_tokens(file_contents)}")
+        print(f"Max tokens per chunk: {MAX_TOKENS_PER_CHUNK}\n")
 
-    # --- Saving Output Chunks ---
+        # Call the main function to start the splitting process for the current file.
+        chunks = semantic_split(text=file_contents, filename=input_filename)
+        all_chunks.extend(chunks)
+        chunk_origins.extend([input_filename] * len(chunks))
+
+    # --- Saving All Output Chunks ---
+    if not all_chunks:
+        print("\n--- No chunks were generated. ---")
+        exit(0)
+
     output_dir = "split"
     os.makedirs(output_dir, exist_ok=True) # Create the output directory if it doesn't exist
 
-    print(f"\n--- Completed: Split into {len(chunks)} chunks ---")
+    total_chunks = len(all_chunks)
+    print(f"\n--- Completed: Split into {total_chunks} chunks across {len(args.file)} file(s) ---")
     print(f"Saving chunks to the '{output_dir}/' directory...\n")
 
-    for i, chunk in enumerate(chunks):
+    for i, chunk in enumerate(all_chunks):
+        original_file_path = chunk_origins[i]
         # Format the filename with 6 digits and leading zeros (e.g., 000001.txt)
         output_filename = os.path.join(output_dir, f"{str(i + 1).zfill(6)}.txt")
         
+        # Create the elegant header with file path and chunk count
+        header = f"SOURCE {original_file_path} (Chunk {i + 1}/{total_chunks})\n"
+
         with open(output_filename, "w", encoding="utf-8") as fw:
+            # Prepend the new header
+            fw.write(header)
             fw.write(chunk)
         
         chunk_token_count = count_tokens(chunk)
-        print(f"Saved chunk {i+1} to '{output_filename}' (Tokens: {chunk_token_count})")
+        print(f"Saved chunk {i + 1}/{total_chunks} to '{output_filename}' (from '{original_file_path}', Tokens: {chunk_token_count})")
 
     print("\n--- All chunks saved successfully. ---")

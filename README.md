@@ -26,12 +26,12 @@ GOOGLE_AISTUDIO_API_KEY=XX123XX123_XXX123XXXXX123XXXXXXX123XXXX
 CONTEXT_WINDOW_SIZE_TOKENS=8192
 ```
 
-## Split the file
+## Split the file(s)
 
 Use [semantic_splitter.py](./semantic_splitter.py) utility to create a folder at [./split](./split/).
 A group of files with naming convention `[000001.txt, 000002.txt, ...]` will be created.
 
-The splitting logic is done by utilizing structured output from `Gemini 2.5 Flash` in a recursive approach, to split the file into small chunks as the LLM sees fit.
+The splitting logic is done by utilizing structured output from `Gemini 2.5 Flash` in a recursive approach, to split the file(s) into small chunks as the LLM sees fit.
 
 ```powershell
 PS C:\Users\user\Downloads\deep_semantic_chunking> pip install -r requirements.txt
