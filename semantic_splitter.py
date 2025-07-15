@@ -353,6 +353,12 @@ if __name__ == "__main__":
         nargs='+',  # Accept one or more file arguments
         help="Path(s) to the input text file(s) to be split."
     )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="split",
+        help="The directory to save the output chunks. Defaults to 'split'. The script will exit if this directory already exists."
+    )
     args = parser.parse_args()
 
     all_chunks = []
@@ -379,10 +385,19 @@ if __name__ == "__main__":
     # --- Saving All Output Chunks ---
     if not all_chunks:
         print("\n--- No chunks were generated. ---")
-        exit(0)
 
-    output_dir = "split"
-    os.makedirs(output_dir, exist_ok=True) # Create the output directory if it doesn't exist
+    output_dir = args.output_dir
+
+    # Check if the output directory already exists.
+    if os.path.exists(output_dir):
+        # Raising an error is more Pythonic and provides a clearer traceback.
+        raise FileExistsError(
+            f"Output directory '{output_dir}' already exists. "
+            "Please specify a new directory with --output-dir or remove the existing one."
+        )
+
+    # Create the output directory
+    os.makedirs(output_dir)
 
     total_chunks = len(all_chunks)
     print(f"\n--- Completed: Split into {total_chunks} chunks across {len(args.file)} file(s) ---")
