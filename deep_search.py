@@ -34,8 +34,9 @@ CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 81
 class Chunk:
     """
     A dataclass to hold the content of a text chunk, its filename,
-    and its pre-calculated token count.
+    its pre-calculated token count, and its original index.
     """
+    original_index: int
     filename: str
     content: str
     token_count: int
@@ -63,7 +64,7 @@ def count_tokens(text: str) -> int:
 def load_chunks_from_disk(directory: str) -> List[Chunk]:
     """
     Loads all .txt files from a directory into a list of Chunk objects.
-    Pre-calculates token counts for each chunk.
+    Pre-calculates token counts and stores the original index for each chunk.
     """
     print("Loading and tokenizing all chunks from disk...")
     if not os.path.isdir(directory):
@@ -73,14 +74,15 @@ def load_chunks_from_disk(directory: str) -> List[Chunk]:
     chunk_files = sorted(glob.glob(os.path.join(directory, "*.txt")))
     chunks: List[Chunk] = []
     
-    for filepath in chunk_files:
+    for i, filepath in enumerate(chunk_files):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 content = f.read()
             
             token_count = count_tokens(content)
             filename = os.path.basename(filepath)
-            chunks.append(Chunk(filename=filename, content=content, token_count=token_count))
+            # Store the original index 'i' in the Chunk object.
+            chunks.append(Chunk(original_index=i, filename=filename, content=content, token_count=token_count))
         except IOError as e:
             print(f"Warning: Could not read file {filepath}: {e}")
     
@@ -220,17 +222,24 @@ Respond with a JSON object in the following format and nothing else:
     print(f"  -> All {max_retries} retries failed. Assuming relevance for {chunk_filename}.")
     return True
 
-def run_search_pass(chunks_to_search: List[Chunk], query: str) -> List[Chunk]:
+def run_search_pass(
+    all_chunks: List[Chunk], 
+    chunks_to_search: List[Chunk], 
+    query: str
+) -> List[Chunk]:
     """
-    Runs a single pass of the search, iterating through chunks and checking relevance.
+    Runs a single search pass, iterating through `chunks_to_search` and
+    checking relevance, using `all_chunks` to build the context window.
     """
     relevant_chunks: List[Chunk] = []
-    total_chunks = len(chunks_to_search)
-
+    
     for i, chunk in enumerate(chunks_to_search):
-        print(f"\nAnalyzing chunk {i + 1}/{total_chunks} ('{chunk.filename}')...")
+        # The progress report now shows progress through the current search set.
+        print(f"\nAnalyzing chunk {i + 1}/{len(chunks_to_search)} ('{chunk.filename}')...")
         
-        context_window = get_dynamic_context_window(chunks_to_search, i, CONTEXT_WINDOW_SIZE_TOKENS)
+        # The context window is always built from the complete original set of chunks
+        # using the chunk's stored original_index.
+        context_window = get_dynamic_context_window(all_chunks, chunk.original_index, CONTEXT_WINDOW_SIZE_TOKENS)
 
         if check_relevance_with_llm(context_window, chunk.content, chunk.filename, query):
             relevant_chunks.append(chunk)
@@ -258,7 +267,7 @@ def display_results(relevant_chunks: List[Chunk]):
 
 def main():
     """
-    Main function to parse arguments and orchestrate the search process.
+    Main function to parse arguments and orchestrate the iterative search process.
     """
     parser = argparse.ArgumentParser(
         description="Perform a deep, contextual search through text chunks using an LLM."
@@ -277,39 +286,47 @@ def main():
     )
     args = parser.parse_args()
 
+    # Load all chunks once at the start. This list will be used for context.
     all_chunks = load_chunks_from_disk(args.dir)
     if not all_chunks:
         print("No chunk files found or loaded. Exiting.")
         return
 
-    # --- Pass 1: Initial Broad Search ---
-    print(f"\n--- Starting Deep Search: Pass 1 (Context window: {CONTEXT_WINDOW_SIZE_TOKENS} tokens) ---")
-    first_pass_results = run_search_pass(all_chunks, args.query)
+    # This list will be updated after each successful pass.
+    active_results = all_chunks
+    query = args.query
+    pass_number = 1
 
-    if not first_pass_results:
-        print("\n--- No relevant sections found in the first pass. ---")
-        return
+    # Main refinement loop
+    while True:
+        print(f"\n--- Starting Deep Search: Pass {pass_number} ({len(active_results)} sections to search, Context window: {CONTEXT_WINDOW_SIZE_TOKENS} tokens) ---")
+        
+        # Always use `all_chunks` for context and `active_results` for the items to search.
+        pass_results = run_search_pass(all_chunks, active_results, query)
+        
+        if not pass_results:
+            print("\n" + "="*80)
+            print("⚠️ Your query returned 0 results.")
+            print("   The search set has been reverted to the previous list of results.")
+            # Do not update active_results, just show the last successful set.
+            display_results(active_results)
+        else:
+            # Update the active set to the new, narrower results.
+            active_results = pass_results
+            display_results(active_results)
 
-    # --- Display Intermediate Results ---
-    display_results(first_pass_results)
+        # Prompt for the next query
+        print("\n" + "="*80)
+        print("You can now enter a new query to search within these results.")
+        print("Press Enter to exit.")
+        print("="*80)
+        
+        pass_number += 1
+        query = input(f"Refinement Query (Pass {pass_number}) > ").strip()
 
-    # --- Pass 2: Refinement Search ---
-    print("\n" + "="*80)
-    print("You can now enter a new query to search within these results.")
-    print("Press Enter to exit without a second pass.")
-    print("="*80)
-    
-    second_query = input("Refinement Query > ").strip()
+        if not query:
+            break
 
-    if not second_query:
-        print("Exiting.")
-        return
-
-    print("\n--- Starting Deep Search: Pass 2 (Refinement) ---")
-    second_pass_results = run_search_pass(first_pass_results, second_query)
-    
-    # --- Display Final Results ---
-    display_results(second_pass_results)
     print("\n--- Deep Search Complete ---")
 
 
