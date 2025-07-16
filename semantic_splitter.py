@@ -384,8 +384,7 @@ if __name__ == "__main__":
     # Create the output directory
     os.makedirs(output_dir)
 
-    all_chunks = []
-    chunk_origins = []
+    global_chunk_counter = 0
 
     # --- File Processing Loop ---
     for input_filename in args.file:
@@ -402,31 +401,37 @@ if __name__ == "__main__":
 
         # Call the main function to start the splitting process for the current file.
         chunks = semantic_split(text=file_contents, filename=input_filename)
-        all_chunks.extend(chunks)
-        chunk_origins.extend([input_filename] * len(chunks))
+        
+        num_chunks_for_this_file = len(chunks)
+        if num_chunks_for_this_file > 0:
+            print(f"--- File '{input_filename}' split into {num_chunks_for_this_file} chunks. Saving... ---\n")
+        
+        # --- Saving Output Chunks for the current file ---
+        for i, chunk in enumerate(chunks):
+            global_chunk_counter += 1
+            chunk_num_for_file = i + 1
+            
+            # Format the filename with a global, incrementing counter
+            output_filename = os.path.join(output_dir, f"{str(global_chunk_counter).zfill(6)}.txt")
+            
+            # Create the header with the file-specific chunk count
+            header = f"SOURCE {input_filename} (Chunk {chunk_num_for_file}/{num_chunks_for_this_file})\n"
 
-    # --- Saving All Output Chunks ---
-    if not all_chunks:
+            with open(output_filename, "w", encoding="utf-8") as fw:
+                # Prepend the new header
+                fw.write(header)
+                fw.write(chunk)
+            
+            chunk_token_count = count_tokens(chunk)
+            print(f"Saved chunk {chunk_num_for_file}/{num_chunks_for_this_file} to '{output_filename}' (from '{input_filename}', Tokens: {chunk_token_count})")
+        
+        # Add a newline for better visual separation between file processing in the console
+        if num_chunks_for_this_file > 0:
+            print("\n")
+
+    # --- Final Summary ---
+    if global_chunk_counter == 0:
         print("\n--- No chunks were generated. ---")
-
-    total_chunks = len(all_chunks)
-    print(f"\n--- Completed: Split into {total_chunks} chunks across {len(args.file)} file(s) ---")
-    print(f"Saving chunks to the '{output_dir}/' directory...\n")
-
-    for i, chunk in enumerate(all_chunks):
-        original_file_path = chunk_origins[i]
-        # Format the filename with 6 digits and leading zeros (e.g., 000001.txt)
-        output_filename = os.path.join(output_dir, f"{str(i + 1).zfill(6)}.txt")
-        
-        # Create the elegant header with file path and chunk count
-        header = f"SOURCE {original_file_path} (Chunk {i + 1}/{total_chunks})\n"
-
-        with open(output_filename, "w", encoding="utf-8") as fw:
-            # Prepend the new header
-            fw.write(header)
-            fw.write(chunk)
-        
-        chunk_token_count = count_tokens(chunk)
-        print(f"Saved chunk {i + 1}/{total_chunks} to '{output_filename}' (from '{original_file_path}', Tokens: {chunk_token_count})")
-
-    print("\n--- All chunks saved successfully. ---")
+    else:
+        print(f"--- Completed: Split {len(args.file)} file(s) into a total of {global_chunk_counter} chunks. ---")
+        print(f"--- All chunks saved successfully in the '{output_dir}/' directory. ---")
