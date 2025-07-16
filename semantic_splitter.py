@@ -307,7 +307,9 @@ Full text:
                 found_index = text.find(split_string)
                 if found_index != -1:
                     split_index = found_index
-                    print("LLM identified a valid split point.")
+                    text_len = len(text)
+                    percentage = (split_index / text_len) * 100 if text_len > 0 else 0
+                    print(f"LLM identified a valid split point. Split {text_len} chars at {split_index} ({percentage:.1f}%).")
                     break  # Success, exit the retry loop
                 else:
                     print(f"Warning (Attempt {attempt + 1}): LLM-suggested string not found in text.")
