@@ -276,7 +276,7 @@ def semantic_split(
         print(f"Text token count ({text_token_count}) exceeds window size ({window_size}). Creating a central window for the LLM.")
         section_text = create_llm_window_from_center(text, window_size)
     else:
-        section_text = text.strip()
+        section_text = text
 
     prompt = f"""I will provide a large block of text.
 The task is: split the large block of text into exactly 2 blocks of text.
@@ -364,8 +364,8 @@ Full text:
 
 
     # 3. Perform the split and recurse on both halves.
-    part1 = text[:split_index].strip()
-    part2 = text[split_index:].strip()
+    part1 = text[:split_index]
+    part2 = text[split_index:]
 
     # The first part always touches the original chunk's start.
     # The second part always touches the original chunk's end.
