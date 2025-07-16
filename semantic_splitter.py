@@ -308,13 +308,12 @@ Full text:
                 if found_index != -1:
                     text_len = len(text)
                     # Check for highly imbalanced splits. If one section has less than
-                    # 2% of the text, discard the LLM's suggestion and use a naive middle split.
+                    # 2% of the text, discard the LLM's suggestion.
                     if text_len > 0 and (found_index < text_len * 0.02 or found_index > text_len * 0.98):
                         percentage = (found_index / text_len) * 100
-                        print(f"Warning: LLM proposed a highly imbalanced split ({percentage:.2f}%).")
-                        print("Reverting to a naive middle split for this step.")
-                        split_index = len(text) // 2
-                        break # Exit the retry loop with the forced split_index.
+                        print(f"Warning (Attempt {attempt + 1}): LLM proposed a highly imbalanced split ({percentage:.2f}%) {text_len} chars. Discarding.")
+                        # By continuing, we treat this as a failed attempt, allowing retries or the fallback to trigger.
+                        continue
                     else:
                         split_index = found_index
                         percentage = (split_index / text_len) * 100 if text_len > 0 else 0
