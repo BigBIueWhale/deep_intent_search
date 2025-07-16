@@ -210,8 +210,6 @@ def fallback_split_by_sentence(text: str) -> int:
 def semantic_split(
     text: str,
     filename: str,
-    touching_file_begin: bool = True,
-    touching_file_end: bool = True,
     chunk_max_size_tokens: int = MAX_TOKENS_PER_CHUNK,
     window_size: int = CONTEXT_WINDOW_SIZE_TOKENS,
 ) -> list[str]:
@@ -223,8 +221,6 @@ def semantic_split(
         text: The block of text to be split.
         filename: The name of the file the text belongs to (for use in the prompt).
         chunk_max_size_tokens: The target maximum token size for a chunk.
-        touching_file_begin: Flag indicating if the text chunk is at the absolute beginning of the file.
-        touching_file_end: Flag indicating if the text chunk is at the absolute end of the file.
         window_size: Max tokens to expose to the LLM from the center of the text.
 
     Returns:
@@ -344,8 +340,8 @@ Full text:
 
     # The first part always touches the original chunk's start.
     # The second part always touches the original chunk's end.
-    results1 = semantic_split(part1, filename, touching_file_begin, False, chunk_max_size_tokens)
-    results2 = semantic_split(part2, filename, False, touching_file_end, chunk_max_size_tokens)
+    results1 = semantic_split(part1, filename, chunk_max_size_tokens)
+    results2 = semantic_split(part2, filename, chunk_max_size_tokens)
 
     return results1 + results2
 
