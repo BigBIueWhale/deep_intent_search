@@ -1,6 +1,5 @@
 import os
 import json
-import nltk
 from google import genai
 from google.genai import types
 import argparse
@@ -17,21 +16,55 @@ if not api_key:
 
 client = genai.Client(api_key=api_key)
 
-# Download and load NLTK's sentence tokenizer model.
-try:
-    # This tokenizer is used for its `span_tokenize` method to get sentence indices.
-    punkt_tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
-except LookupError:
-    print("NLTK 'punkt' model not found. Downloading...")
-    nltk.download('punkt')
-    punkt_tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
-print("NLTK 'punkt' sentence tokenizer loaded.")
-
 # Get context window size from environment variable, with a default.
 CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 8192))
 MAX_TOKENS_PER_CHUNK = 1024
 
 # --- Helper Functions ---
+
+def custom_span_tokenize(text: str) -> list[tuple[int, int]]:
+    """
+    A custom implementation that mimics NLTK's span_tokenize but uses
+    a simpler, deterministic approach based on characters.
+
+    It first attempts to split the text by newline characters ('\n').
+    If this results in fewer than 3 spans, it falls back to splitting
+    by any whitespace character (' ', '\t', '\n').
+
+    Args:
+        text: The input string to split.
+
+    Returns:
+        A list of (start, end) tuples indicating the spans of the segments.
+        The segments themselves do not include the delimiter.
+    """
+    # First, try splitting by newlines.
+    spans = []
+    start = 0
+    delimiters = ['\n', '\r']
+    for i, char in enumerate(text):
+        if char in delimiters:
+            if i > start:  # Ensure we don't create empty spans from consecutive delimiters
+                spans.append((start, i))
+            start = i + 1
+    if start < len(text):  # Add the final segment after the last delimiter
+        spans.append((start, len(text)))
+
+    # If we got too few splits (e.g., a single long line of text),
+    # fall back to splitting by any whitespace.
+    if len(spans) < 3:
+        spans = []  # Reset for the new strategy
+        start = 0
+        delimiters = [' ', '\t', '\n', '\r']
+        for i, char in enumerate(text):
+            if char in delimiters:
+                if i > start:  # Ensure we don't create empty spans
+                    spans.append((start, i))
+                start = i + 1
+        if start < len(text):  # Add the final segment
+            spans.append((start, len(text)))
+
+    return spans
 
 def count_tokens(text: str) -> int:
     """
@@ -101,9 +134,9 @@ def truncate_text_to_window(text: str, window_size: int) -> str:
 
 def create_llm_window_from_center(text: str, window_size: int) -> str:
     """
-    Extracts a window of text from the center of the input using NLTK sentence spans.
+    Extracts a window of text from the center of the input using the custom span tokenizer.
     This preserves the original text, including whitespace. It uses a binary search
-    to find the largest central chunk of sentences that fits the token limit.
+    to find the largest central chunk of text that fits the token limit.
 
     Args:
         text: The text to be windowed.
@@ -115,34 +148,34 @@ def create_llm_window_from_center(text: str, window_size: int) -> str:
     if count_tokens(text) <= window_size:
         return text
 
-    # Use span_tokenize to get sentence start/end indices, preserving original text.
-    sentence_spans = list(punkt_tokenizer.span_tokenize(text))
+    # Use the custom span_tokenize to get segment start/end indices.
+    sentence_spans = custom_span_tokenize(text)
     num_sentences = len(sentence_spans)
     
     if num_sentences <= 1:
-        # If there's only one sentence, and it's too long, we must truncate it.
+        # If there's only one segment, and it's too long, we must truncate it.
         return truncate_text_to_window(text, window_size)
 
-    # Find the middle sentence(s) which will be the anchor for our window
+    # Find the middle segment(s) which will be the anchor for our window
     center_start_idx = (num_sentences - 1) // 2
     center_end_idx = num_sentences // 2
 
-    # Binary search for the optimal number of sentences (k) to expand on each side of the center
+    # Binary search for the optimal number of segments (k) to expand on each side of the center
     low = 0
     high = num_sentences // 2
     
-    # Start with the center sentence(s) as the best guess
+    # Start with the center segment(s) as the best guess
     start_char = sentence_spans[center_start_idx][0]
     end_char = sentence_spans[center_end_idx][1]
     best_window_text = text[start_char:end_char]
 
-    # Check if even the center sentence(s) are too large.
+    # Check if even the center segment(s) are too large.
     if count_tokens(best_window_text) > window_size:
-        # If the combined center sentences are too big, try just the single middle one.
+        # If the combined center segments are too big, try just the single middle one.
         single_middle_span = sentence_spans[num_sentences // 2]
         single_middle_sentence = text[single_middle_span[0]:single_middle_span[1]]
         if count_tokens(single_middle_sentence) > window_size:
-            # If even the single middle sentence is too big, it must be truncated.
+            # If even the single middle segment is too big, it must be truncated.
             return truncate_text_to_window(single_middle_sentence, window_size)
         else:
             return single_middle_sentence
@@ -167,10 +200,9 @@ def create_llm_window_from_center(text: str, window_size: int) -> str:
 
     return best_window_text
 
-def fallback_split_by_sentence(text: str) -> int:
+def fallback_split_by_delimiter(text: str) -> int:
     """
-    Finds a split point in the text that is closest to the middle using NLTK sentence spans.
-    This is much more robust than string searching.
+    Finds a split point in the text that is closest to the middle using the custom span tokenizer.
 
     Args:
         text: The text to be split.
@@ -178,20 +210,20 @@ def fallback_split_by_sentence(text: str) -> int:
     Returns:
         The index at which to split the text.
     """
-    sentence_spans = list(punkt_tokenizer.span_tokenize(text))
+    sentence_spans = custom_span_tokenize(text)
     
     best_split_point = -1
 
     if len(sentence_spans) <= 1:
-        # If there's one or no sentences, we can't split by sentence.
+        # If there's one or no segments, we can't split by this method.
         pass
     else:
         target_length = len(text) // 2
         min_distance = float('inf')
 
-        # Find the sentence end that's closest to the middle of the text
+        # Find the segment end that's closest to the middle of the text
         for start, end in sentence_spans:
-            # We don't want to split at the very end of the text, so we skip the last sentence boundary
+            # We don't want to split at the very end of the text, so we skip the last boundary
             if end == len(text):
                 continue
                 
@@ -202,9 +234,9 @@ def fallback_split_by_sentence(text: str) -> int:
             
     if best_split_point != -1:
         percentage = (best_split_point / len(text)) * 100 if len(text) > 0 else 0
-        print(f"Using fallback: splitting text by sentence boundary. Split {len(text)} chars at {best_split_point} ({percentage:.1f}%).")
+        print(f"Using fallback: splitting text by delimiter boundary. Split {len(text)} chars at {best_split_point} ({percentage:.1f}%).")
     else:
-        print("Using fallback: splitting text by sentence boundary, but no suitable split point was found.")
+        print("Using fallback: splitting text by delimiter, but no suitable split point was found.")
             
     # Note: Might return -1
     return best_split_point
@@ -220,7 +252,7 @@ def semantic_split(
 ) -> list[str]:
     """
     Recursively splits a text into semantically coherent chunks based on LLM suggestions.
-    Retries the LLM call before using a sentence-based fallback.
+    Retries the LLM call before using a delimiter-based fallback.
 
     Args:
         text: The block of text to be split.
@@ -285,19 +317,11 @@ Full text:
             json_start = response_text.find('{')
             if json_start != -1:
                 response_text = response_text[json_start:]
-            json_end = response_text.find('}')
+            json_end = response_text.rfind('}')
             if json_end != -1:
                 response_text = response_text[:json_end + 1]
 
-            try:
-                split_data = json.loads(response_text)
-            except json.JSONDecodeError as e:
-                # The LLM often gets confused when the contents themselves contain closing curly braces '}'
-                if "unterminated string" in e.msg.lower():
-                    response_text += '"}'
-                    split_data = json.loads(response_text)
-                else:
-                    raise
+            split_data = json.loads(response_text)
             split_string = split_data.get("begin_second_section")
 
             if split_string:
@@ -329,13 +353,13 @@ Full text:
         if attempt < max_retries - 1:
             print("Retrying LLM call...")
 
-    # 2. Fallback: If LLM fails after all retries, use a sentence-based split.
+    # 2. Fallback: If LLM fails after all retries, use a delimiter-based split.
     if split_index == -1:
         print("LLM splitting failed after all retries.")
-        split_index = fallback_split_by_sentence(text)
-        # Final safety net if sentence splitting also fails
+        split_index = fallback_split_by_delimiter(text)
+        # Final safety net if delimiter splitting also fails
         if split_index == -1:
-            print("Sentence splitting failed. Reverting to naive middle split.")
+            print("Delimiter splitting failed. Reverting to naive middle split.")
             split_index = len(text) // 2
 
 
@@ -370,6 +394,11 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    if not args.file:
+        raise ValueError(
+            "Error: No input files specified. Please provide at least one file using the --file argument."
+        )
+
     output_dir = args.output_dir
 
     # Check if the output directory already exists.
@@ -388,7 +417,7 @@ if __name__ == "__main__":
     # --- File Processing Loop ---
     for input_filename in args.file:
         try:
-            with open(input_filename, "r", encoding="utf-8") as fr:
+            with open(input_filename, "r", encoding="utf-8", errors='ignore') as fr:
                 file_contents = fr.read()
         except FileNotFoundError:
             print(f"Error: The file '{input_filename}' was not found. Skipping.")
