@@ -180,12 +180,13 @@ def fallback_split_by_sentence(text: str) -> int:
     """
     sentence_spans = list(punkt_tokenizer.span_tokenize(text))
     
+    best_split_point = -1
+
     if len(sentence_spans) <= 1:
         # If there's one or no sentences, we can't split by sentence.
         pass
     else:
         target_length = len(text) // 2
-        best_split_point = -1
         min_distance = float('inf')
 
         # Find the sentence end that's closest to the middle of the text
