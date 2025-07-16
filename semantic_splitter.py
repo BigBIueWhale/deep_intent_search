@@ -203,8 +203,8 @@ def fallback_split_by_sentence(text: str) -> int:
             min_distance = distance
             best_split_point = end
             
-    # If no suitable split point was found (e.g., only one sentence), fallback to naive split.
-    return best_split_point if best_split_point != -1 else len(text) // 2
+    # Note: Might return -1
+    return best_split_point
 
 
 # --- Core Recursive Function ---
