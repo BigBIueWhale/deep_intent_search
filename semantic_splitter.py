@@ -178,28 +178,32 @@ def fallback_split_by_sentence(text: str) -> int:
     Returns:
         The index at which to split the text.
     """
-    print("Using fallback: splitting text by sentence boundary.")
     sentence_spans = list(punkt_tokenizer.span_tokenize(text))
     
     if len(sentence_spans) <= 1:
         # If there's one or no sentences, we can't split by sentence.
-        # Fallback to the original naive middle split.
-        return len(text) // 2
+        pass
+    else:
+        target_length = len(text) // 2
+        best_split_point = -1
+        min_distance = float('inf')
 
-    target_length = len(text) // 2
-    best_split_point = -1
-    min_distance = float('inf')
-
-    # Find the sentence end that's closest to the middle of the text
-    for start, end in sentence_spans:
-        # We don't want to split at the very end of the text, so we skip the last sentence boundary
-        if end == len(text):
-            continue
+        # Find the sentence end that's closest to the middle of the text
+        for start, end in sentence_spans:
+            # We don't want to split at the very end of the text, so we skip the last sentence boundary
+            if end == len(text):
+                continue
+                
+            distance = abs(end - target_length)
+            if distance < min_distance:
+                min_distance = distance
+                best_split_point = end
             
-        distance = abs(end - target_length)
-        if distance < min_distance:
-            min_distance = distance
-            best_split_point = end
+    if best_split_point != -1:
+        percentage = (best_split_point / len(text)) * 100 if len(text) > 0 else 0
+        print(f"Using fallback: splitting text by sentence boundary. Split {len(text)} chars at {best_split_point} ({percentage:.1f}%).")
+    else:
+        print("Using fallback: splitting text by sentence boundary, but no suitable split point was found.")
             
     # Note: Might return -1
     return best_split_point
