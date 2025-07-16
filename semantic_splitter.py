@@ -72,8 +72,6 @@ def truncate_text_to_window(text: str, window_size: int) -> str:
     """
     if count_tokens(text) <= window_size:
         return text
-
-    print("Warning: A single text segment is too large. Truncating it to fit the window.")
     
     # Binary search for the number of characters to keep in the middle
     low = 0
