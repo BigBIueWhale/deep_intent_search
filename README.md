@@ -28,7 +28,7 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 
 ## Split the file(s)
 
-The input to the search is a list of text files. Say you have a PDF- you'll have to first convert that into a text file.
+The input to the search are text file(s). Say you have a PDF- you'll have to first convert that into a text file.
 
 Use [semantic_splitter.py](./semantic_splitter.py) utility to create a folder at [./split](./split/).
 A group of files with naming convention `[000001.txt, 000002.txt, ...]` will be created.
