@@ -181,7 +181,8 @@ The user's query is: "{query}"
 {context}
 --- CONTEXT ENDS ---
 
-Now, focusing exclusively on the following text, is there anything in this specific section that is even **remotely** relevant to the user's query?
+Now, focusing exclusively on the following text, is there anything in this specific section
+that fits the user's query **as it is written**?
 
 --- SECTION OF INTEREST ({chunk_filename}) ---
 {chunk_of_interest}
