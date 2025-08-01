@@ -82,4 +82,15 @@ This is the most expensive possible way to search, and it's very unlikely to mis
 Run this command:
 ```powershell
 PS C:\Users\user\Downloads\deep_semantic_chunking> python deep_search.py --query "Interested finding a fully-spelled-out direct explanation of why we should believe in god. I want to find an explicitly stated logical argument- and crucially I'm exclusively interested in an argument that directly addresses the concern of no proof being available for his existence"
+Loading and tokenizing all chunks from disk...
+Successfully loaded 1127 chunks into memory.
+
+--- Starting Deep Search: Pass 1 (1127 sections to search, Context window: 8192 tokens) ---
+
+Analyzing chunk 1/1127 ('000001.txt')...
+  -> LLM decision: Not Relevant
+
+Analyzing chunk 2/1127 ('000002.txt')...
+  -> LLM decision: Not Relevant
+[...collapsed 3376 lines]
 ```
