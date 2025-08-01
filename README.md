@@ -186,7 +186,7 @@ Regardless of the high cost of this brute force approach, there are some legitim
 
 When a human reads text, we might learn new concepts that enter our long-term memory, then upon the second read we will actually be able to better-understand the text and more accurately mark relevant sections with a yellow marker.
 
-Due to our long-term learning, we can also link two distant parts of the text to gain additional insights and context.
+Thanks to human's long-term learning, we can also link two distant parts of the text to gain additional insights and context. Classic example is learning new terminology from context in one part of a report, to understand another part of the report much more accurately.
 
 Current LLM technology only has in-context learning which starts degrading in quality when passing ~4096 tokens.\
 Even training an LLM on a piece of text will not help it learn the specific information at all, because LLMs can only learn from being presented the same information in multiple different contexts, wordings and formats.\
