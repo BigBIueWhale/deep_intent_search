@@ -153,12 +153,12 @@ I've uploaded [the final search results](./tanakh_search_results.txt) of this ex
 
 ## Future Research
 
-😱 Running the tool is very expensive. Could be upwards of $5 USD for every search pass through all 7 books of Harry Potter.
+😱 Running the tool is very expensive. Observed to cost upwards of $5 USD for every search pass on the 7 books of Harry Potter.
 
 <img src="./doc/gemini_api_billing.png" alt="Gemini API billing screenshot" width="500">
 
 Given that, future project goals could be-
-- Generate an extremely high-quality dataset of search results, will require generating synthetic intent-oriented search queries. Even if the synthetic intent-oriented search queries aren't extremely high-quality, the search results are the result of so much processing power `ThinkingConfig(thinking_budget=-1)` that the generated dataset will contain concentrated intelligence traces.
+- Generate an extremely high-quality dataset of search results, will require generating synthetic intent-oriented search queries. Even if the synthetic intent-oriented search queries aren't extremely high-quality, the search results are the outcome of so much processing power `ThinkingConfig(thinking_budget=-1)` that the generated dataset will contain concentrated intelligence traces.
 
 - Add **ELO tournament** scoring for the purpose of ordering the results from most relevant to least relevant.
 
