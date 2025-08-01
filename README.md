@@ -92,5 +92,62 @@ Analyzing chunk 1/1127 ('000001.txt')...
 
 Analyzing chunk 2/1127 ('000002.txt')...
   -> LLM decision: Not Relevant
-[...collapsed 3376 lines]
+[...collapsed 3373 lines]
+Analyzing chunk 1127/1127 ('001127.txt')...
+  -> LLM decision: Not Relevant
+
+================================================================================
+Found 47 relevant section(s):
+================================================================================
+
+- 000021.txt (Tokens: 933)
+- 000034.txt (Tokens: 806)
+[...collapsed 44 lines]
+- 001049.txt (Tokens: 844)
+
+================================================================================
+You can now enter a new query to search within these results.
+Press Enter to exit.
+================================================================================
+Refinement Query (Pass 2) > Looking for arguments of god existing that might still be relevant today, and not dependent on specific ancient people who may or may not have witnessed specific miracles more than 2000 years ago.  
+
+--- Starting Deep Search: Pass 2 (47 sections to search, Context window: 8192 tokens) ---
+
+Analyzing chunk 1/47 ('000021.txt')...
+  -> LLM decision: Not Relevant
+
+Analyzing chunk 2/47 ('000034.txt')...
+  -> LLM decision: Relevant
+
+[...collapsed 133 lines]
+Analyzing chunk 47/47 ('001049.txt')...
+  -> LLM decision: Relevant
+
+================================================================================
+Found 14 relevant section(s):
+================================================================================
+
+- 000034.txt (Tokens: 806)
+- 000043.txt (Tokens: 818)
+- 000058.txt (Tokens: 820)
+- 000062.txt (Tokens: 1033)
+- 000305.txt (Tokens: 933)
+- 000307.txt (Tokens: 824)
+- 000308.txt (Tokens: 1023)
+- 000309.txt (Tokens: 866)
+- 000310.txt (Tokens: 423)
+- 000312.txt (Tokens: 688)
+- 000488.txt (Tokens: 908)
+- 000798.txt (Tokens: 829)
+- 000805.txt (Tokens: 1038)
+- 001049.txt (Tokens: 844)
+
+================================================================================
+You can now enter a new query to search within these results.
+Press Enter to exit.
+================================================================================
+Refinement Query (Pass 3) >
 ```
+
+We've found 14 relevant sections, which are 11,853 tokens combined.
+I've uploaded [the final search results](./tanakh_search_results.txt) of this example.
