@@ -67,7 +67,7 @@ PS C:\Users\user\Downloads\deep_intent_search>
 ```
 
 ## Search through the chunks
-Once you have a folder [./split](./split/) containing ordered chunks of the files (or a single large file), it's time to perform the deep search.
+Once you have a folder [./split](./split/) containing ordered chunks of all the files, it's time to perform the deep search.
 
 We'll use [deep_search.py](./deep_search.py) utility to search based on intent, just like a human reading through a book.
 
