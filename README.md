@@ -172,7 +172,7 @@ Regardless of the high cost of this brute force approach, there are some legitim
 
 - **RAG**- allows a smart LLM to get the precise information it needs for in-context learning to actually work, as opposed to current RAG implementations that fail at having a model truly learn what it needs to know.
 
-- **Law**- can do the menial job of searching through a large book of laws (or precendences) to find specific sections that are relevant to the case of interest.
+- **Law**- can do the menial job of searching through a large book of laws (or precedents) to find specific sections that are relevant to the case of interest.
 
 - **Police / Intelligence Agencies**- can be a game-changing tool for professional detectives that might read through boring logs and reports, 99% of which are not relevant to the case being researched.
 
