@@ -60,7 +60,9 @@ Text token count (45281) exceeds window size (8192). Creating a central window f
 LLM identified a valid split point. Split 95022 chars at 50254 (52.9%).
 Text token count (24024) exceeds window size (8192). Creating a central window for the LLM.
 LLM identified a valid split point. Split 50254 chars at 18444 (36.7%).
-[...total ~3000 lines]
+[...collapsed 2811 lines]
+--- Completed: Split 39 file(s) into a total of 1127 chunks. ---
+--- All chunks saved successfully in the 'split/' directory. ---
 PS C:\Users\user\Downloads\deep_intent_search>
 ```
 
