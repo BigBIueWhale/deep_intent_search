@@ -150,3 +150,47 @@ Refinement Query (Pass 3) >
 
 We've found 14 relevant sections, which are 11,853 tokens combined.
 I've uploaded [the final search results](./tanakh_search_results.txt) of this example.
+
+## Future Research
+
+😱 Running the tool is very expensive. Could be upwards of $5 USD for every search pass through all 7 books of Harry Potter.
+
+<img src="./doc/gemini_api_billing.png" alt="Gemini API billing screenshot" width="500">
+
+Given that, future project goals could be-
+- Generate an extremely high-quality dataset of search results, will require generating synthetic intent-oriented search queries. Even if the synthetic intent-oriented search queries aren't extremely high-quality, the search results are the result of so much processing power `ThinkingConfig(thinking_budget=-1)` that the generated dataset will contain concentrated intelligence traces.
+
+- Add **ELO tournament** scoring for the purpose of ordering the results from most relevant to least relevant.
+
+- Generate high-quality search results dataset **as a benchmark** to test the long context quality in LLM research.
+
+- Generate huge (potentially limitless) high-quality search results dataset to train an LLM-like model to be **natively** good at long-context search, which could be offered as an affordable, scalable and fast alternative to this expensive, and rather brute-force approach.
+
+## Usecases
+
+Regardless of the high cost of this brute force approach, there are some legitimate usecases where `Deep Intent Search` can be a gamechanger:
+
+- **RAG**- allows a smart LLM to get the precise information it needs for in-context learning to actually work, as opposed to current RAG implementations that fail at having a model truly learn what it needs to know.
+
+- **Law**- can do the menial job of searching through a large book of laws (or precendences) to find specific sections that are relevant to the case of interest.
+
+- **Police / Intelligence Agencies**- can be a game-changing tool for professional detectives that might read through boring logs and reports, 99% of which are not relevant to the case being researched.
+
+- **Cybersecurity**- can read through network logs to identify suspicious activity.
+
+- **Messaging Apps**- make Telegram search actually work.
+
+- **Image Search**- This technology in essense should work with other media formats other than text.
+
+## Fundamental Limitation
+
+When a human reads text, we might learn new concepts that enter our long-term memory, then upon the second read we will actually be able to better-understand the text and more accurately mark relevant sections with a yellow marker.
+
+Due to our long-term learning, we can also link two distant parts of the text to gain additional insights and context.
+
+Current LLM technology only has in-context learning which starts degrading in quality when passing ~4096 tokens.\
+Even training an LLM on a piece of text will not help it learn the specific information at all, because LLMs can only learn from being presented the same information in multiple different contexts, wordings and formats.\
+Current LLMs will not learn any specific information by training, only in-context learning.\
+If you see an LLM learn new information from a single-example in training then that's not learning, that's overfitting / memorization.
+
+This limitations is one of the pillars of AGI.
