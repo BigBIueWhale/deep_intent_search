@@ -164,7 +164,7 @@ Given that, future project goals could be-
 
 - Generate high-quality search results dataset **as a benchmark** to test the long context quality in LLM research.
 
-- Generate huge (potentially limitless) high-quality search results dataset to train an LLM-like model to be **natively** good at long-context search, which could be offered as an affordable, scalable and fast alternative to this expensive, and rather brute-force approach.
+- Generate huge (potentially limitless) high-quality search results dataset to train an LLM-like model to be **natively** good at long-context search, which could be offered as an affordable, scalable and fast alternative to this expensive and rather brute-force approach.
 
 ## Usecases
 
