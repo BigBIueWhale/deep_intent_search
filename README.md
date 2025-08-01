@@ -3,19 +3,18 @@ Search algorithm that rivals the accuracy of a human reading through an article 
 
 ## Introduction
 
-Existing solutions:
+### My Solution
+I can't afford missing **any** relevant information in the series of text documents I present, so I introduce `Deep Intent Search`.
+
+My [search process](#search-through-the-chunks) takes advantage of the accurate language understanding that LLMs exhibit at short context lengths (<1024 tokens).
+
+### Existing Alternatives
 
 - 📏 Long context-length LLMs
 
 - 🌲 Utilizing embedding LLMs to create a vector database.
 
 - 🔢 Classic keyword-based lexical search algorithms
-
-None of the aforementioned solutions are as thorough as manually reading a book or a series of articles chapter by chapter, and marking relevant information with a yellow marker 🖍️.
-
-I can't afford missing **any** relevant information in the series of text documents I present, so I introduce `Deep Intent Search`.
-
-For more information, see [search process](#search-through-the-chunks).
 
 ## Create .env
 
