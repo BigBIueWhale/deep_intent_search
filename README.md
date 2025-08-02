@@ -184,13 +184,20 @@ Regardless of the high cost of this brute force approach, there are some legitim
 
 ## Fundamental Limitation
 
+What if the LLM doesn't fully understand the text?
+
 When a human reads text, we might learn new concepts that enter our long-term memory, then upon the second read we will actually be able to better-understand the text and more accurately mark relevant sections with a yellow marker.
 
 Thanks to human's long-term learning, we can also link two distant parts of the text to gain additional insights and context. Classic example is learning new terminology from context in one part of a report, to understand another part of the report much more accurately.
 
-Current LLM technology only has in-context learning which starts degrading in quality when passing ~4096 tokens.\
-Even training an LLM on a piece of text will not help it learn the specific information at all, because LLMs can only learn from being presented the same information in multiple different contexts, wordings and formats.\
-Current LLMs will not learn any specific information by training, only in-context learning.\
-If you see an LLM learn new information from a single-example in training then that's not learning, that's overfitting / memorization.
+Current LLM technology only has in-context learning, which starts degrading in quality when surpassing ~4096 tokens.\
+Training an LLM on a piece of text will not help it learn the specific information at all, because LLMs can only learn from being presented the same information in multiple different contexts, wordings and formats.
 
-This limitations is one of the pillars of AGI.
+For example- the reason most LLMs can accurately describe specific plot points in Harry Potter is hardly the result of the LLM training on the English text of Harry Potter. It's actually thanks to the discussion forums, hints in cultural references, summaries, book reports, and literary analyses that all help the LLM memorize the plot line details of Harry Potter. The information has to exist in multiple contexts, wordings and formats for the LLM to actually learn and not just overfit.
+
+That's why current LLMs cannot learn any specific information by training, only in-context learning.
+
+This can be observed in humans. A human who tries to memorize a sentence without thinking about the meaning, will not memorize the meaning of that sentence. They might be able to repeat the sentence, but definitely not use its contents as part of a thought process.\
+Memorization of a piece of text into long-term memory on-demand will always reuqire a human to make a conscious effort to find strong mental connections to existing brain circuits. A human might think about the information in a diverse set of ways, ask questions about the information in their internal dialogue, and consciously / subconsciously find connections to existing knowledge- In LLM lingo this might be called "synthetic information expansion for self-training".
+
+Once we solve that problem, we will have AGI- In current LLM architectures the weights are static. Imagine if LLMs were constantly trained on the output of the LLM itself during pretraining, instead of bring trained on the raw text they can be trained on the LLMs thoughts regarding that text. Somehow train the LLM to truly memorize and understand pieces of information by optimally blabbering about the topic, A.K.A "synthetic information expansion for self-training". The problem is we need to find a robust mechanism that will be the LLM have an incentive to optimally think about text while it's learning it.
