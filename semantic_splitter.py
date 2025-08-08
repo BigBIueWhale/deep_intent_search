@@ -17,7 +17,7 @@ if not api_key:
 client = OpenAI()
 
 # Get context window size from environment variable, with a default.
-CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 8192)
+CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 8192))
 MAX_TOKENS_PER_CHUNK = 1024
 
 # --- Helper Functions ---
