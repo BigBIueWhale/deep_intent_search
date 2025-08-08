@@ -271,7 +271,7 @@ The purpose is choosing a starting position for the second section that makes se
 Output JSON in the format:
 {{ "begin_second_section": "text\ngoes here. Always ends with double quote (as JSON requires)" }}
 
-Output enough text in the JSON field to be uniquely identifiable (3-5 words).
+Output only enough text in the JSON field to be uniquely identifiable (3-5 words).
 Output the text **exactly** as it appears in the raw input to allow for a naive str.find() approach to work.
 
 Full text:
@@ -290,11 +290,12 @@ Full text:
             response = client.responses.create(
                 model=os.environ.get("OPENAI_MODEL", "gpt-5-nano"),
                 input=[
-                    {"role": "system", "content": "Only output minified valid JSON."},
+                    {"role": "system", "content": "Adhere to the instructions as they are written. No more, no less."},
                     {"role": "user", "content": prompt}
                 ],
                 reasoning={ "effort": 'medium' },
                 text={
+                    "verbosity": "low",
                     "format": {
                         "name": "SplitDescription",
                         "type": "json_schema",

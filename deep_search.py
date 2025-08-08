@@ -190,11 +190,12 @@ Respond with a JSON object in the following format and nothing else:
             response = CLIENT.responses.create(
                 model=os.environ.get("OPENAI_MODEL", "gpt-5-nano"),
                 input=[
-                    {"role": "system", "content": "Only output minified valid JSON."},
+                    {"role": "system", "content": "Adhere to the instructions as they are written. No more, no less."},
                     {"role": "user", "content": prompt}
                 ],
                 reasoning={ "effort": 'medium' },
                 text={
+                    "verbosity": "low",
                     "format": {
                         "name": "BooleanDecree",
                         "type": "json_schema",
