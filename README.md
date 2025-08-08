@@ -8,6 +8,16 @@ I can't afford missing **any** relevant information in the series of text docume
 
 My [search process](#search-through-the-chunks) takes advantage of the accurate language understanding that LLMs exhibit at short context lengths (<1024 tokens).
 
+## Evidence-First Verdicts (Why This Helps)
+
+LLMs are human-preferenced trained, they tend to "put on a show". In strict relevance tasks that creates a bias toward **marking borderline text as relevant** just to avoid disappointing the user.
+
+To redirect that impulse productively, Deep Intent Search **requires evidence** alongside every verdict. For each chunk, the model must output:
+- `is_relevant`: `true` or `false`
+- `evidence`: **exactly three short sentences**, extremely concise and information-dense, drawn from the section of interest.
+
+Instead of overselling relevance, the model "performs" by writing a high-quality micro-justification we can ignore operationally but use for quick spot-checks.
+
 ### Existing Alternatives
 
 - 📏 Long context-length LLMs

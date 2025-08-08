@@ -156,6 +156,8 @@ def check_relevance_with_llm(
 ) -> bool:
     """
     Asks the LLM to determine if a chunk is relevant to the query.
+    Also requests a 3-sentence, extremely concise, information-dense evidence summary
+    justifying the verdict, derived ONLY from the SECTION OF INTEREST.
     """
     if not CLIENT:
         print("LLM client not initialized. Assuming relevance as a fallback.")
@@ -181,7 +183,8 @@ that fits the user's query **as it is written**?
 
 Respond with a JSON object in the following format and nothing else:
 {{
-  "is_relevant": <true or false>
+  "is_relevant": <true or false>,
+  "evidence": "<EXACTLY three short sentences. Extremely concise and information-dense. Summarize the decisive cues from the SECTION OF INTEREST only (quote key words/phrases when useful). If NOT relevant, state the key reason(s) it fails; if relevant, state the key reason(s) it matches.>"
 }}
 """
 
@@ -202,9 +205,10 @@ Respond with a JSON object in the following format and nothing else:
                         "schema": {
                             "type": "object",
                             "properties": {
-                                "is_relevant": {"type": "boolean"}
+                                "is_relevant": {"type": "boolean"},
+                                "evidence": {"type": "string", "minLength": 1}
                             },
-                            "required": ["is_relevant"],
+                            "required": ["is_relevant", "evidence"],
                             "additionalProperties": False,
                         },
                     }
@@ -215,7 +219,10 @@ Respond with a JSON object in the following format and nothing else:
 
             if parsed_json and "is_relevant" in parsed_json:
                 relevance = parsed_json["is_relevant"]
+                evidence = parsed_json.get("evidence", "").strip()
                 print(f"  -> LLM decision: {'Relevant' if relevance else 'Not Relevant'}")
+                if evidence:
+                    print(f"  -> Evidence: {evidence}")
                 return bool(relevance)
             else:
                 print(f"  -> Warning (Attempt {attempt + 1}/{max_retries}): LLM response was malformed. Response: {response_text}")
