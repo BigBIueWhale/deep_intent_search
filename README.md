@@ -21,9 +21,11 @@ My [search process](#search-through-the-chunks) takes advantage of the accurate 
 Create [.env](./.env) file containing:
 
 ```md
-OPENAI_API_KEY=XX123XX123_XXX123XXXXX123XXXXXXX123XXXX
+OPENAI_API_KEY=sk-proj-O5rq6x3C8NgCVv6jhbPaISQ4t28ty4s2SIbouDrZ_NeAByAo0P0EMLEFrUxORx-18o1wqV_UOaK7NedgNWgW-ZPFRPfh5fyuCgeJHq0qr_Zs8IDDYLc1dBHLFv9SjMFV0F2js4t36bbnVV1PTihpRnFQiOwA
 CONTEXT_WINDOW_SIZE_TOKENS=8192
 ```
+
+Make sure to create your own API key on the openai website.
 
 ## Split the file(s)
 
