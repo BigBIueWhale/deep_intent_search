@@ -1,20 +1,3 @@
-def count_tokens(text: str) -> int:
-    """
-    Offline token counting using tiktoken with the o4-mini tokenizer.
-    NOTE: GPT-5 tokenizer mapping is not yet available in tiktoken; see
-    https://github.com/openai/tiktoken/issues/422 for context. Once GPT-5
-    support lands, consider switching to the official tokenizer mapping.
-    """
-    # Using o4-mini encoding as a pragmatic stand-in until GPT-5 is supported.
-    enc = tiktoken.encoding_for_model("o4-mini")
-    return len(enc.encode(text))
-
-def count_tokens(text: str) -> int:
-    """
-    Rough token estimator (~4 chars per token). No external API calls.
-    """
-    return len(text) // 4
-
 import os
 import json
 import glob
@@ -68,6 +51,7 @@ def count_tokens(text: str) -> int:
     """
     enc = tiktoken.encoding_for_model("o4-mini")  # stand-in until GPT-5 supported
     return len(enc.encode(text))
+
 def load_chunks_from_disk(directory: str) -> List[Chunk]:
     """
     Loads all .txt files from a directory into a list of Chunk objects.
@@ -209,9 +193,8 @@ Respond with a JSON object in the following format and nothing else:
                     {"role": "system", "content": "Only output minified valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
-                reasoning_effort="high",
-                max_tokens=16384,
-                response_format={"type": "json_object"},
+                reasoning={ "effort": 'medium' },
+                max_output_tokens=16384,
             )
             response_text = getattr(response, 'output_text', None) or (response.choices[0].message.content if getattr(response, 'choices', None) else '')
             parsed_json = safe_json_loads(response_text)

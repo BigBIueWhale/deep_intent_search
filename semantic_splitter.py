@@ -293,9 +293,8 @@ Full text:
                     {"role": "system", "content": "Only output minified valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
-                reasoning_effort="high",
-                max_tokens=16384,
-                response_format={"type": "json_object"},
+                reasoning={ "effort": 'medium' },
+                max_output_tokens=16384,
             )
             response_text = getattr(response, 'output_text', None) or (response.choices[0].message.content if getattr(response, 'choices', None) else '')
 
