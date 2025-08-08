@@ -294,7 +294,20 @@ Full text:
                     {"role": "user", "content": prompt}
                 ],
                 reasoning={ "effort": 'medium' },
-                max_output_tokens=16384,
+                text={
+                    "format": {
+                        "name": "SplitDescription",
+                        "type": "json_schema",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "begin_second_section": {"type": "string"}
+                            },
+                            "required": ["begin_second_section"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
             )
             response_text = getattr(response, 'output_text', None) or (response.choices[0].message.content if getattr(response, 'choices', None) else '')
 

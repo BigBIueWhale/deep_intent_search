@@ -194,7 +194,20 @@ Respond with a JSON object in the following format and nothing else:
                     {"role": "user", "content": prompt}
                 ],
                 reasoning={ "effort": 'medium' },
-                max_output_tokens=16384,
+                text={
+                    "format": {
+                        "name": "BooleanDecree",
+                        "type": "json_schema",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "is_relevant": {"type": "boolean"}
+                            },
+                            "required": ["is_relevant"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
             )
             response_text = getattr(response, 'output_text', None) or (response.choices[0].message.content if getattr(response, 'choices', None) else '')
             parsed_json = safe_json_loads(response_text)
