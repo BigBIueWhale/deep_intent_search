@@ -1,26 +1,36 @@
 import os
 import json
-from google import genai
-from google.genai import types
+from openai import OpenAI
 import argparse
 from dotenv import load_dotenv
+import tiktoken
 
 # --- Setup ---
 # Load environment variables from a .env file for security
 load_dotenv()
 
-# Initialize the Google Generative AI client. Handle missing API key.
-api_key = os.environ.get("GOOGLE_AISTUDIO_API_KEY")
+# Initialize the OpenAI client. Handle missing API key.
+api_key = os.environ.get("OPENAI_API_KEY")
 if not api_key:
-    raise ValueError("GOOGLE_AISTUDIO_API_KEY environment variable not set.")
+    raise ValueError("OPENAI_API_KEY environment variable not set.")
 
-client = genai.Client(api_key=api_key)
+client = OpenAI()
 
 # Get context window size from environment variable, with a default.
-CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 8192))
+CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 8192)
 MAX_TOKENS_PER_CHUNK = 1024
 
 # --- Helper Functions ---
+
+def count_tokens(text: str) -> int:
+    """
+    Offline token counting using tiktoken with the o4-mini tokenizer.
+    NOTE: GPT-5 tokenizer mapping is not yet available in tiktoken; see
+    https://github.com/openai/tiktoken/issues/422 for context. Once GPT-5
+    support lands, consider switching to the official tokenizer mapping.
+    """
+    enc = tiktoken.encoding_for_model("o4-mini")  # stand-in until GPT-5 supported
+    return len(enc.encode(text))
 
 def custom_span_tokenize(text: str) -> list[tuple[int, int]]:
     """
@@ -66,30 +76,6 @@ def custom_span_tokenize(text: str) -> list[tuple[int, int]]:
 
     return spans
 
-def count_tokens(text: str) -> int:
-    """
-    Counts the number of tokens in a given text string using the
-    integrated tokenizer of the Google Generative AI SDK.
-
-    Args:
-        text: The text to be tokenized.
-
-    Returns:
-        The number of tokens in the text.
-    """
-    # The model name must match the one used for generation for consistent token counting.
-    # The 'models/' prefix is required for the count_tokens method.
-    try:
-        response = client.models.count_tokens(
-            model='models/gemini-2.5-flash',
-            contents=[text]
-        )
-        return response.total_tokens
-    except Exception as e:
-        print(f"Could not count tokens due to an API error: {e}. Falling back to an estimate.")
-        # Fallback to a character-based estimate if the API call fails.
-        return len(text) // 4
-
 def truncate_text_to_window(text: str, window_size: int) -> str:
     """
     Truncates a single string to fit within the window_size by removing characters
@@ -105,7 +91,7 @@ def truncate_text_to_window(text: str, window_size: int) -> str:
     """
     if count_tokens(text) <= window_size:
         return text
-    
+
     # Binary search for the number of characters to keep in the middle
     low = 0
     # The number of characters to keep can't exceed the total length
@@ -114,7 +100,7 @@ def truncate_text_to_window(text: str, window_size: int) -> str:
 
     while low <= high:
         k = (low + high) // 2 # k is the number of chars to keep in the middle
-        
+
         # To keep the center, we calculate start and end points
         text_len = len(text)
         start = (text_len - k) // 2
@@ -128,7 +114,7 @@ def truncate_text_to_window(text: str, window_size: int) -> str:
         else:
             # This candidate is too large, we must make it smaller
             high = k - 1
-            
+
     return best_text
 
 
@@ -151,7 +137,7 @@ def create_llm_window_from_center(text: str, window_size: int) -> str:
     # Use the custom span_tokenize to get segment start/end indices.
     sentence_spans = custom_span_tokenize(text)
     num_sentences = len(sentence_spans)
-    
+
     if num_sentences <= 1:
         # If there's only one segment, and it's too long, we must truncate it.
         return truncate_text_to_window(text, window_size)
@@ -163,7 +149,7 @@ def create_llm_window_from_center(text: str, window_size: int) -> str:
     # Binary search for the optimal number of segments (k) to expand on each side of the center
     low = 0
     high = num_sentences // 2
-    
+
     # Start with the center segment(s) as the best guess
     start_char = sentence_spans[center_start_idx][0]
     end_char = sentence_spans[center_end_idx][1]
@@ -184,7 +170,7 @@ def create_llm_window_from_center(text: str, window_size: int) -> str:
         k = (low + high) // 2
         start_idx = max(0, center_start_idx - k)
         end_idx = min(num_sentences - 1, center_end_idx + k)
-        
+
         # Get the text from the original string using the calculated spans
         start_char = sentence_spans[start_idx][0]
         end_char = sentence_spans[end_idx][1]
@@ -211,7 +197,7 @@ def fallback_split_by_delimiter(text: str) -> int:
         The index at which to split the text.
     """
     sentence_spans = custom_span_tokenize(text)
-    
+
     best_split_point = -1
 
     if len(sentence_spans) <= 1:
@@ -226,18 +212,18 @@ def fallback_split_by_delimiter(text: str) -> int:
             # We don't want to split at the very end of the text, so we skip the last boundary
             if end == len(text):
                 continue
-                
+
             distance = abs(end - target_length)
             if distance < min_distance:
                 min_distance = distance
                 best_split_point = end
-            
+
     if best_split_point != -1:
         percentage = (best_split_point / len(text)) * 100 if len(text) > 0 else 0
         print(f"Using fallback: splitting text by delimiter boundary. Split {len(text)} chars at {best_split_point} ({percentage:.1f}%).")
     else:
         print("Using fallback: splitting text by delimiter, but no suitable split point was found.")
-            
+
     # Note: Might return -1
     return best_split_point
 
@@ -300,17 +286,19 @@ Full text:
     # 1. Call the LLM to find the optimal split point.
     for attempt in range(max_retries):
         try:
-            # Generate content using the Gemini model
-            response = client.models.generate_content(
-                contents=prompt,
-                model="gemini-2.5-flash",
-                config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(thinking_budget=-1),
-                    response_mime_type='application/json',
-                ),
+            # Generate content using OpenAI (GPT-5 Nano)
+            response = client.responses.create(
+                model=os.environ.get("OPENAI_MODEL", "gpt-5-nano"),
+                input=[
+                    {"role": "system", "content": "Only output minified valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                reasoning_effort="high",
+                max_tokens=16384,
+                response_format={"type": "json_object"},
             )
-            response_text = response.text
-            
+            response_text = getattr(response, 'output_text', None) or (response.choices[0].message.content if getattr(response, 'choices', None) else '')
+
             # qwen3 would require removing think tag
             # if response_text.strip().startswith('<think>'):
             #     response_text = response_text.split('</think>', 1)[-1]
@@ -349,7 +337,7 @@ Full text:
 
         except (json.JSONDecodeError, AttributeError, Exception) as e:
             print(f"Warning (Attempt {attempt + 1}): An API or JSON parsing error occurred: {e}.")
-        
+
         if attempt < max_retries - 1:
             print("Retrying LLM call...")
 
@@ -380,8 +368,8 @@ if __name__ == "__main__":
         description="Split one or more large text files into smaller, semantically coherent chunks."
     )
     parser.add_argument(
-        "--file", 
-        type=str, 
+        "--file",
+        type=str,
         required=True,
         nargs='+',  # Accept one or more file arguments
         help="Path(s) to the input text file(s) to be split."
@@ -429,19 +417,19 @@ if __name__ == "__main__":
 
         # Call the main function to start the splitting process for the current file.
         chunks = semantic_split(text=file_contents, filename=input_filename)
-        
+
         num_chunks_for_this_file = len(chunks)
         if num_chunks_for_this_file > 0:
             print(f"--- File '{input_filename}' split into {num_chunks_for_this_file} chunks. Saving... ---\n")
-        
+
         # --- Saving Output Chunks for the current file ---
         for i, chunk in enumerate(chunks):
             global_chunk_counter += 1
             chunk_num_for_file = i + 1
-            
+
             # Format the filename with a global, incrementing counter
             output_filename = os.path.join(output_dir, f"{str(global_chunk_counter).zfill(6)}.txt")
-            
+
             # Create the header with the file-specific chunk count
             header = f"SOURCE {input_filename} (Chunk {chunk_num_for_file}/{num_chunks_for_this_file})\n"
 
@@ -449,10 +437,10 @@ if __name__ == "__main__":
                 # Prepend the new header
                 fw.write(header)
                 fw.write(chunk)
-            
+
             chunk_token_count = count_tokens(chunk)
             print(f"Saved chunk {chunk_num_for_file}/{num_chunks_for_this_file} to '{output_filename}' (from '{input_filename}', Tokens: {chunk_token_count})")
-        
+
         # Add a newline for better visual separation between file processing in the console
         if num_chunks_for_this_file > 0:
             print("\n")

@@ -1,3 +1,20 @@
+def count_tokens(text: str) -> int:
+    """
+    Offline token counting using tiktoken with the o4-mini tokenizer.
+    NOTE: GPT-5 tokenizer mapping is not yet available in tiktoken; see
+    https://github.com/openai/tiktoken/issues/422 for context. Once GPT-5
+    support lands, consider switching to the official tokenizer mapping.
+    """
+    # Using o4-mini encoding as a pragmatic stand-in until GPT-5 is supported.
+    enc = tiktoken.encoding_for_model("o4-mini")
+    return len(enc.encode(text))
+
+def count_tokens(text: str) -> int:
+    """
+    Rough token estimator (~4 chars per token). No external API calls.
+    """
+    return len(text) // 4
+
 import os
 import json
 import glob
@@ -6,23 +23,22 @@ import argparse
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
-from google import genai
-from google.genai import types
+from openai import OpenAI
 from dotenv import load_dotenv
+import tiktoken
 
 # --- Setup ---
 # Load environment variables from a .env file for security.
 load_dotenv()
 
-# Initialize the Google Generative AI client. Handle missing API key.
+# Initialize the OpenAI client. Handle missing API key.
 try:
-    api_key = os.environ.get("GOOGLE_AISTUDIO_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise ValueError("GOOGLE_AISTUDIO_API_KEY environment variable not set.")
-    # Create a client instance, as requested.
-    CLIENT = genai.Client(api_key=api_key)
+        raise ValueError("OPENAI_API_KEY environment variable not set.")
+    CLIENT = OpenAI()
 except (ValueError, ImportError) as e:
-    print(f"Error initializing Google Generative AI Client: {e}")
+    print(f"Error initializing OpenAI Client: {e}")
     CLIENT = None
 
 # Get context window size from environment variable, with a default.
@@ -45,22 +61,13 @@ class Chunk:
 
 def count_tokens(text: str) -> int:
     """
-    Counts the number of tokens in a given text string using the API.
+    Offline token counting using tiktoken with the o4-mini tokenizer.
+    NOTE: GPT-5 tokenizer mapping is not yet available in tiktoken; see
+    https://github.com/openai/tiktoken/issues/422 for context. Once GPT-5
+    support lands, consider switching to the official tokenizer mapping.
     """
-    if not CLIENT:
-        # Fallback for when the client isn't available.
-        return len(text) // 4
-    try:
-        # The 'models/' prefix is required for the count_tokens method.
-        response = CLIENT.models.count_tokens(
-            model='models/gemini-2.5-flash',
-            contents=[text]
-        )
-        return response.total_tokens
-    except Exception as e:
-        print(f"Could not count tokens due to an API error: {e}. Falling back to an estimate.")
-        return len(text) // 4
-
+    enc = tiktoken.encoding_for_model("o4-mini")  # stand-in until GPT-5 supported
+    return len(enc.encode(text))
 def load_chunks_from_disk(directory: str) -> List[Chunk]:
     """
     Loads all .txt files from a directory into a list of Chunk objects.
@@ -73,25 +80,25 @@ def load_chunks_from_disk(directory: str) -> List[Chunk]:
 
     chunk_files = sorted(glob.glob(os.path.join(directory, "*.txt")))
     chunks: List[Chunk] = []
-    
+
     for i, filepath in enumerate(chunk_files):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 content = f.read()
-            
+
             token_count = count_tokens(content)
             filename = os.path.basename(filepath)
             # Store the original index 'i' in the Chunk object.
             chunks.append(Chunk(original_index=i, filename=filename, content=content, token_count=token_count))
         except IOError as e:
             print(f"Warning: Could not read file {filepath}: {e}")
-    
+
     print(f"Successfully loaded {len(chunks)} chunks into memory.")
     return chunks
 
 def get_dynamic_context_window(
-    all_chunks: List[Chunk], 
-    current_index: int, 
+    all_chunks: List[Chunk],
+    current_index: int,
     max_tokens: int
 ) -> str:
     """
@@ -107,15 +114,15 @@ def get_dynamic_context_window(
         A single string containing the concatenated text of the context window.
     """
     chunk_of_interest = all_chunks[current_index]
-    
+
     # Start with the chunk of interest
     context_parts = [chunk_of_interest.content]
     current_tokens = chunk_of_interest.token_count
-    
+
     # Pointers for expanding left and right
     left_ptr = current_index - 1
     right_ptr = current_index + 1
-    
+
     # Alternate adding from left and right until we can't anymore
     while left_ptr >= 0 or right_ptr < len(all_chunks):
         # Try adding from the right
@@ -139,7 +146,7 @@ def get_dynamic_context_window(
             else:
                 # Can't add more on the left, stop trying
                 left_ptr = -1
-                
+
     return "\n---\n".join(context_parts)
 
 def safe_json_loads(text: str) -> Optional[Dict[str, Any]]:
@@ -196,16 +203,17 @@ Respond with a JSON object in the following format and nothing else:
 
     for attempt in range(max_retries):
         try:
-            response = CLIENT.models.generate_content(
-                contents=prompt,
-                model="gemini-2.5-flash",
-                config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(thinking_budget=-1),
-                    response_mime_type='application/json',
-                ),
+            response = CLIENT.responses.create(
+                model=os.environ.get("OPENAI_MODEL", "gpt-5-nano"),
+                input=[
+                    {"role": "system", "content": "Only output minified valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                reasoning_effort="high",
+                max_tokens=16384,
+                response_format={"type": "json_object"},
             )
-            
-            response_text = response.text
+            response_text = getattr(response, 'output_text', None) or (response.choices[0].message.content if getattr(response, 'choices', None) else '')
             parsed_json = safe_json_loads(response_text)
 
             if parsed_json and "is_relevant" in parsed_json:
@@ -217,15 +225,15 @@ Respond with a JSON object in the following format and nothing else:
 
         except Exception as e:
             print(f"  -> An error occurred on attempt {attempt + 1}/{max_retries}: {e}")
-        
+
         time.sleep(2)
 
     print(f"  -> All {max_retries} retries failed. Assuming relevance for {chunk_filename}.")
     return True
 
 def run_search_pass(
-    all_chunks: List[Chunk], 
-    chunks_to_search: List[Chunk], 
+    all_chunks: List[Chunk],
+    chunks_to_search: List[Chunk],
     query: str
 ) -> List[Chunk]:
     """
@@ -233,11 +241,11 @@ def run_search_pass(
     checking relevance, using `all_chunks` to build the context window.
     """
     relevant_chunks: List[Chunk] = []
-    
+
     for i, chunk in enumerate(chunks_to_search):
         # The progress report now shows progress through the current search set.
         print(f"\nAnalyzing chunk {i + 1}/{len(chunks_to_search)} ('{chunk.filename}')...")
-        
+
         # The context window is always built from the complete original set of chunks
         # using the chunk's stored original_index.
         context_window = get_dynamic_context_window(all_chunks, chunk.original_index, CONTEXT_WINDOW_SIZE_TOKENS)
@@ -258,7 +266,7 @@ def display_results(relevant_chunks: List[Chunk]):
     if not relevant_chunks:
         print("No relevant sections were found for your query.")
         return
-    
+
     # Only print the filename and token count, not the content.
     for chunk in relevant_chunks:
         print(f"- {chunk.filename} (Tokens: {chunk.token_count})")
@@ -273,15 +281,15 @@ def main():
         description="Perform a deep, contextual search through text chunks using an LLM."
     )
     parser.add_argument(
-        "--query", 
-        type=str, 
-        required=True, 
+        "--query",
+        type=str,
+        required=True,
         help="The initial search query."
     )
     parser.add_argument(
-        "--dir", 
-        type=str, 
-        default="split", 
+        "--dir",
+        type=str,
+        default="split",
         help="The directory containing the text chunks (default: 'split')."
     )
     args = parser.parse_args()
@@ -300,10 +308,10 @@ def main():
     # Main refinement loop
     while True:
         print(f"\n--- Starting Deep Search: Pass {pass_number} ({len(active_results)} sections to search, Context window: {CONTEXT_WINDOW_SIZE_TOKENS} tokens) ---")
-        
+
         # Always use `all_chunks` for context and `active_results` for the items to search.
         pass_results = run_search_pass(all_chunks, active_results, query)
-        
+
         if not pass_results:
             print("\n" + "="*80)
             print("⚠️ Your query returned 0 results.")
@@ -319,7 +327,7 @@ def main():
         print("You can now enter a new query to search within these results.")
         print("Press Enter to exit.")
         print("="*80)
-        
+
         pass_number += 1
         query = input(f"Refinement Query (Pass {pass_number}) > ").strip()
 

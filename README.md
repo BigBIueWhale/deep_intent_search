@@ -21,7 +21,7 @@ My [search process](#search-through-the-chunks) takes advantage of the accurate 
 Create [.env](./.env) file containing:
 
 ```md
-GOOGLE_AISTUDIO_API_KEY=XX123XX123_XXX123XXXXX123XXXXXXX123XXXX
+OPENAI_API_KEY=XX123XX123_XXX123XXXXX123XXXXXXX123XXXX
 CONTEXT_WINDOW_SIZE_TOKENS=8192
 ```
 
@@ -32,7 +32,7 @@ The input to the search are text file(s). Say you have a PDF- you'll have to fir
 Use [semantic_splitter.py](./semantic_splitter.py) utility to create a folder at [./split](./split/).
 A group of files with naming convention `[000001.txt, 000002.txt, ...]` will be created.
 
-The splitting logic is done by utilizing structured output from `Gemini 2.5 Flash` in a recursive approach, to split the file(s) into small chunks as the LLM sees fit.
+The splitting logic is done by utilizing structured output from `GPT-5 Nano` in a recursive approach, to split the file(s) into small chunks as the LLM sees fit.
 
 ```powershell
 PS C:\Users\user\Downloads\deep_intent_search> python semantic_splitter.py --file "C:\Users\user\Downloads\tanakh\Prophets\Amos\Hebrew\Tanach with Text Only.txt" "C:\Users\user\Downloads\tanakh\Prophets\Ezekiel\Hebrew\Tanach with Text Only.txt" [...total 39 files]
@@ -74,7 +74,7 @@ The algorithm goes through each chunk (<1024 tokens) while providing up to `CONT
 
 For example, if the current chunk is `000019.txt`, then the contents of surrounding adjacent chunks such as `[000016.txt, ..., 000019.txt, ..., 000022.txt]` will be included. This is important to give the LLM context regarding the meaning and significance of the (current) chunk of interest.
 
-We want to avoid missing any relevant information, so the script makes a new and separate `Gemini 2.5 Flash` LLM completion request focusing on each chunk- meaning each chunk will be fed into the LLM multiple times in practice.
+We want to avoid missing any relevant information, so the script makes a new and separate `GPT-5 Nano` LLM completion request focusing on each chunk- meaning each chunk will be fed into the LLM multiple times in practice.
 
 This is the most expensive possible way to search, and it's very unlikely to miss any relevant information about the search query.
 
@@ -108,7 +108,7 @@ Found 47 relevant section(s):
 You can now enter a new query to search within these results.
 Press Enter to exit.
 ================================================================================
-Refinement Query (Pass 2) > Looking for arguments of god existing that might still be relevant today, and not dependent on specific ancient people who may or may not have witnessed specific miracles more than 2000 years ago.  
+Refinement Query (Pass 2) > Looking for arguments of god existing that might still be relevant today, and not dependent on specific ancient people who may or may not have witnessed specific miracles more than 2000 years ago.
 
 --- Starting Deep Search: Pass 2 (47 sections to search, Context window: 8192 tokens) ---
 
@@ -153,7 +153,7 @@ I've uploaded [the final search results](./tanakh_search_results.txt) of this ex
 
 ## Future Research
 
-😱 Running the tool is very expensive. Observed to cost upwards of $5 USD for every search pass on the 7 books of Harry Potter.
+😱 Running the tool is very expensive (tested with Gemini 2.5 Flash). Observed to cost upwards of $5 USD for every search pass on the 7 books of Harry Potter.
 
 <img src="./doc/gemini_api_billing.png" alt="Gemini API billing screenshot" width="500">
 
