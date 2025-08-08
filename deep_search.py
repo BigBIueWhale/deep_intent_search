@@ -77,7 +77,8 @@ def load_chunks_from_disk(directory: str) -> List[Chunk]:
         except IOError as e:
             print(f"Warning: Could not read file {filepath}: {e}")
 
-    print(f"Successfully loaded {len(chunks)} chunks into memory.")
+    total_tokens = sum(c.token_count for c in chunks)
+    print(f"Loaded {len(chunks)} chunks ({sum(c.token_count for c in chunks):,} tokens).")
     return chunks
 
 def get_dynamic_context_window(
