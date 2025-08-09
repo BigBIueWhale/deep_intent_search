@@ -37,6 +37,67 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 
 Make sure to create your own API key on the openai website.
 
+## Search through the chunks
+First use [semantic_splitter.py](#split-the-files). Then once you have a folder [./split](./split/) containing ordered chunks of all the files, it's time to perform the deep search.
+
+We'll use [deep_search.py](./deep_search.py) utility to search based on intent, just like a human reading through a book.
+
+The algorithm goes through each chunk (<1024 tokens) while providing up to `CONTEXT_WINDOW_SIZE_TOKENS` surrounding that chunk.
+
+For example, if the current chunk is `000019.txt`, then the contents of surrounding adjacent chunks such as `[000016.txt, ..., 000019.txt, ..., 000022.txt]` will be included. This is important to give the LLM context regarding the meaning and significance of the (current) chunk of interest.
+
+We want to avoid missing any relevant information, so the script makes a new and separate `GPT-5 Nano` LLM completion request focusing on each chunk- meaning each chunk will be fed into the LLM multiple times in practice.
+
+This is the most expensive possible way to search, and it's very unlikely to miss any relevant information about the search query.
+
+Run this command:
+```powershell
+PS C:\Users\user\Downloads\deep_semantic_chunking> python deep_search.py --query "Looking for **solid** evidence of the fact that if you say Voldemort's explicit name, he will find you. I'm **not** interested in theories or rumors that are mentioned in the book. I'm **not** interested in hearing someone say He who must not be named, just because they're afraid, again, due to these rumors. I'm only looking for instances where this actually happened. And where Voldemort **actually** somehow seems to gain information from somebody saying his name."
+Loading and tokenizing all chunks from disk...
+Loaded 2790 chunks (1,646,744 tokens).
+
+--- Starting Deep Search: Pass 1 (2790 sections to search, Context window: 8192 tokens) ---
+
+Analyzing chunk 1/2790 ('000001.txt')...
+  -> LLM decision: Not Relevant
+  -> Evidence: ...
+
+Analyzing chunk 2/2790 ('000002.txt')...
+  -> LLM decision: Not Relevant
+  -> Evidence: ...
+
+[...collapsed 5000+ lines]
+
+Analyzing chunk 2544/2790 ('002544.txt')...
+  -> LLM decision: Relevant
+  -> Evidence: "the name’s been jinxed, Harry, that’s how they track people!" "Using his name breaks protective enchantments, it’s how they found us in Tottenham Court Road!" "they’ve put a Taboo on it, anyone who says it is trackable — quick-and-easy way to find Order members!"
+
+[...collapsed 100+ lines]
+
+Analyzing chunk 2587/2790 ('002587.txt')...
+  -> LLM decision: Relevant
+  -> Evidence: The text states, "the name’s been Tabooed" and that "a few Order members have been tracked that way." This indicates that saying Voldemort's name can lead to being tracked by his followers. It does not show Voldemort actively finding someone in this section, but it presents the Taboo as a mechanism for discovery.
+
+[...collapsed 800+ lines]
+
+================================================================================
+Found 2 relevant section(s):
+================================================================================
+
+- 002544.txt (Tokens: 475)
+- 002587.txt (Tokens: 624)
+
+================================================================================
+You can now enter a new query to search within these results.
+Press Enter to exit.
+================================================================================
+Refinement Query (Pass 2) >
+```
+
+The only issue is- `GPT-4-nano` is an idiot. It doesn't know Hebrew very well, and often confuses nearby sections- ignoring the base requirement to only look at the "SECTION OF INTEREST".
+
+Disclaimer: In the above Harry Potter search, `GPT-4-nano` actually marked 9 additional results as relevant. All nearby (before and after) `002587.txt`. This caused 9 false-positives. Entirely due to the lack of instruction following displayed by `GPT-4-nano`. I had to manually edit the results to remove those false positives to avoid confusing the readers of this readme.
+
 ## Split the file(s)
 
 The input to the search are text file(s). Say you have a PDF- you'll have to first convert that into a text file.
@@ -77,97 +138,9 @@ LLM identified a valid split point. Split 50254 chars at 18444 (36.7%).
 PS C:\Users\user\Downloads\deep_intent_search>
 ```
 
-## Search through the chunks
-Once you have a folder [./split](./split/) containing ordered chunks of all the files, it's time to perform the deep search.
-
-We'll use [deep_search.py](./deep_search.py) utility to search based on intent, just like a human reading through a book.
-
-The algorithm goes through each chunk (<1024 tokens) while providing up to `CONTEXT_WINDOW_SIZE_TOKENS` surrounding that chunk.
-
-For example, if the current chunk is `000019.txt`, then the contents of surrounding adjacent chunks such as `[000016.txt, ..., 000019.txt, ..., 000022.txt]` will be included. This is important to give the LLM context regarding the meaning and significance of the (current) chunk of interest.
-
-We want to avoid missing any relevant information, so the script makes a new and separate `GPT-5 Nano` LLM completion request focusing on each chunk- meaning each chunk will be fed into the LLM multiple times in practice.
-
-This is the most expensive possible way to search, and it's very unlikely to miss any relevant information about the search query.
-
-Run this command:
-```powershell
-PS C:\Users\user\Downloads\deep_semantic_chunking> python deep_search.py --query "Interested finding a fully-spelled-out direct explanation of why we should believe in god. I want to find an explicitly stated logical argument- and crucially I'm exclusively interested in an argument that directly addresses the concern of no proof being available for his existence"
-Loading and tokenizing all chunks from disk...
-Successfully loaded 1127 chunks into memory.
-
---- Starting Deep Search: Pass 1 (1127 sections to search, Context window: 8192 tokens) ---
-
-Analyzing chunk 1/1127 ('000001.txt')...
-  -> LLM decision: Not Relevant
-
-Analyzing chunk 2/1127 ('000002.txt')...
-  -> LLM decision: Not Relevant
-[...collapsed 3373 lines]
-Analyzing chunk 1127/1127 ('001127.txt')...
-  -> LLM decision: Not Relevant
-
-================================================================================
-Found 47 relevant section(s):
-================================================================================
-
-- 000021.txt (Tokens: 933)
-- 000034.txt (Tokens: 806)
-[...collapsed 44 lines]
-- 001049.txt (Tokens: 844)
-
-================================================================================
-You can now enter a new query to search within these results.
-Press Enter to exit.
-================================================================================
-Refinement Query (Pass 2) > Looking for arguments of god existing that might still be relevant today, and not dependent on specific ancient people who may or may not have witnessed specific miracles more than 2000 years ago.
-
---- Starting Deep Search: Pass 2 (47 sections to search, Context window: 8192 tokens) ---
-
-Analyzing chunk 1/47 ('000021.txt')...
-  -> LLM decision: Not Relevant
-
-Analyzing chunk 2/47 ('000034.txt')...
-  -> LLM decision: Relevant
-
-[...collapsed 133 lines]
-Analyzing chunk 47/47 ('001049.txt')...
-  -> LLM decision: Relevant
-
-================================================================================
-Found 14 relevant section(s):
-================================================================================
-
-- 000034.txt (Tokens: 806)
-- 000043.txt (Tokens: 818)
-- 000058.txt (Tokens: 820)
-- 000062.txt (Tokens: 1033)
-- 000305.txt (Tokens: 933)
-- 000307.txt (Tokens: 824)
-- 000308.txt (Tokens: 1023)
-- 000309.txt (Tokens: 866)
-- 000310.txt (Tokens: 423)
-- 000312.txt (Tokens: 688)
-- 000488.txt (Tokens: 908)
-- 000798.txt (Tokens: 829)
-- 000805.txt (Tokens: 1038)
-- 001049.txt (Tokens: 844)
-
-================================================================================
-You can now enter a new query to search within these results.
-Press Enter to exit.
-================================================================================
-Refinement Query (Pass 3) >
-```
-
-We've found 14 relevant sections, which are 11,853 tokens combined.
-I've uploaded [the final search results](./tanakh_search_results.txt) of this example.
-
 ## Future Research
 
-😱 Running the tool is very expensive (tested with Gemini 2.5 Flash). Observed to cost upwards of $5 USD for every search pass on the 7 books of Harry Potter.
-
-<img src="./doc/gemini_api_billing.png" alt="Gemini API billing screenshot" width="500">
+😱 Running the tool is very expensive and slow (tested with GPT-5-nano). Estimated price $3.65 for every search pass on the 7 books of Harry Potter- and that's not including the `semantic_splitter.py` step.
 
 Given that, future project goals could be-
 - Generate an extremely high-quality dataset of search results, will require generating synthetic intent-oriented search queries. Even if the synthetic intent-oriented search queries aren't extremely high-quality, the search results are the outcome of so much processing power `ThinkingConfig(thinking_budget=-1)` that the generated dataset will contain concentrated intelligence traces.
