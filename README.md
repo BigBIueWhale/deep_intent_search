@@ -94,7 +94,7 @@ Press Enter to exit.
 Refinement Query (Pass 2) >
 ```
 
-The only issue is- `GPT-4-nano` is an idiot. It doesn't know Hebrew very well, and often confuses nearby sections- ignoring the base requirement to only look at the "SECTION OF INTEREST".
+The only issue is- `GPT-4-nano` is an idiot. It not the best at instruction following, and often confuses nearby sections- ignoring the base requirement to only look at the "SECTION OF INTEREST".
 
 Disclaimer: In the above Harry Potter search, `GPT-4-nano` actually marked 9 additional results as relevant. All nearby (before and after) `002587.txt`. This caused 9 false-positives. Entirely due to the lack of instruction following displayed by `GPT-4-nano`. I had to manually edit the results to remove those false positives to avoid confusing the readers of this readme.
 
