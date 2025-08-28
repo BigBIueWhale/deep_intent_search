@@ -178,9 +178,9 @@ The user's query is: "{query}"
 Now, focusing exclusively on the following text, is there anything in this specific section
 that fits the user's query **as it is written**?
 
---- SECTION OF INTEREST ({chunk_filename}) ---
+--- SECTION OF INTEREST BEGINS ({chunk_filename}) ---
 {chunk_of_interest}
---- END OF SECTION ---
+--- SECTION OF INTEREST ENDS ---
 
 Respond with a JSON object in the following format and nothing else:
 {{
