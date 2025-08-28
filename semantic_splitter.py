@@ -1,36 +1,23 @@
 import os
 import json
-from openai import OpenAI
 import argparse
 from dotenv import load_dotenv
-import tiktoken
+
+from core.tokens import count_tokens
+from core.llm import get_client, get_model_name, get_ollama_options
 
 # --- Setup ---
 # Load environment variables from a .env file for security
 load_dotenv()
 
-# Initialize the OpenAI client. Handle missing API key.
-api_key = os.environ.get("OPENAI_API_KEY")
-if not api_key:
-    raise ValueError("OPENAI_API_KEY environment variable not set.")
-
-client = OpenAI()
+# Initialize the Ollama client (no raw HTTP; library only).
+client = get_client()
 
 # Get context window size from environment variable, with a default.
 CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 8192))
 MAX_TOKENS_PER_CHUNK = 1024
 
 # --- Helper Functions ---
-
-def count_tokens(text: str) -> int:
-    """
-    Offline token counting using tiktoken with the o4-mini tokenizer.
-    NOTE: GPT-5 tokenizer mapping is not yet available in tiktoken; see
-    https://github.com/openai/tiktoken/issues/422 for context. Once GPT-5
-    support lands, consider switching to the official tokenizer mapping.
-    """
-    enc = tiktoken.encoding_for_model("o4-mini")  # stand-in until GPT-5 supported
-    return len(enc.encode(text))
 
 def custom_span_tokenize(text: str) -> list[tuple[int, int]]:
     """
@@ -283,36 +270,23 @@ Full text:
     split_index = -1
     max_retries = 3
 
+    model = get_model_name()
+    options = get_ollama_options()
+
     # 1. Call the LLM to find the optimal split point.
     for attempt in range(max_retries):
         try:
-            # Generate content using OpenAI (GPT-5 Nano)
-            response = client.responses.create(
-                model=os.environ.get("OPENAI_MODEL", "gpt-5-nano"),
-                input=[
-                    {"role": "system", "content": "Adhere to the instructions as they are written. No more, no less."},
-                    {"role": "user", "content": prompt}
-                ],
-                reasoning={ "effort": 'medium' },
-                text={
-                    "verbosity": "low",
-                    "format": {
-                        "name": "SplitDescription",
-                        "type": "json_schema",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "begin_second_section": {"type": "string"}
-                            },
-                            "required": ["begin_second_section"],
-                            "additionalProperties": False,
-                        },
-                    }
-                },
+            # Generate content using Ollama (qwen3:32b)
+            response = client.chat(
+                model=model,
+                messages=messages,
+                format="json",   # request strict JSON
+                options=options, # advanced parameters on every request
+                stream=False,
             )
-            response_text = getattr(response, 'output_text', None) or (response.choices[0].message.content if getattr(response, 'choices', None) else '')
+            response_text = (response.get("message", {}) or {}).get("content", "") if isinstance(response, dict) else ""
 
-            # qwen3 would require removing think tag
+            # qwen3 would require removing think tag (left comment; not applying transformation)
             # if response_text.strip().startswith('<think>'):
             #     response_text = response_text.split('</think>', 1)[-1]
             json_start = response_text.find('{')
@@ -362,7 +336,6 @@ Full text:
         if split_index == -1:
             print("Delimiter splitting failed. Reverting to naive middle split.")
             split_index = len(text) // 2
-
 
     # 3. Perform the split and recurse on both halves.
     part1 = text[:split_index]

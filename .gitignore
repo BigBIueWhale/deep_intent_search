@@ -1,4 +1,5 @@
 /.env
+/venv
 /split
 /examples
 /combine.py

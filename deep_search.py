@@ -6,25 +6,20 @@ import argparse
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
-from openai import OpenAI
+# NOTE: Centralized utilities (as requested)
 from dotenv import load_dotenv
-import tiktoken
+from core.tokens import count_tokens  # centralized token counting (Qwen tokenizer)
+from core.llm import get_client, get_model_name, get_ollama_options  # centralized LLM access
 
 # --- Setup ---
 # Load environment variables from a .env file for security.
 load_dotenv()
 
-# Initialize the OpenAI client. Handle missing API key.
-try:
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable not set.")
-    CLIENT = OpenAI()
-except (ValueError, ImportError) as e:
-    print(f"Error initializing OpenAI Client: {e}")
-    CLIENT = None
+# Initialize the Ollama client (no raw HTTP; library only).
+CLIENT = get_client()
 
 # Get context window size from environment variable, with a default.
+# (This governs how much *surrounding text* we feed around the chunk of interest, not the model's num_ctx.)
 CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 8192))
 
 # --- Data Structure ---
@@ -41,16 +36,6 @@ class Chunk:
     token_count: int
 
 # --- Helper Functions ---
-
-def count_tokens(text: str) -> int:
-    """
-    Offline token counting using tiktoken with the o4-mini tokenizer.
-    NOTE: GPT-5 tokenizer mapping is not yet available in tiktoken; see
-    https://github.com/openai/tiktoken/issues/422 for context. Once GPT-5
-    support lands, consider switching to the official tokenizer mapping.
-    """
-    enc = tiktoken.encoding_for_model("o4-mini")  # stand-in until GPT-5 supported
-    return len(enc.encode(text))
 
 def load_chunks_from_disk(directory: str) -> List[Chunk]:
     """
@@ -189,35 +174,27 @@ Respond with a JSON object in the following format and nothing else:
 }}
 """
 
+    messages = [
+        {"role": "system", "content": "Adhere to the instructions as they are written. No more, no less."},
+        {"role": "user", "content": prompt},
+    ]
+
+    options = get_ollama_options()
+    model = get_model_name()
+
     for attempt in range(max_retries):
         try:
-            response = CLIENT.responses.create(
-                model=os.environ.get("OPENAI_MODEL", "gpt-5-nano"),
-                input=[
-                    {"role": "system", "content": "Adhere to the instructions as they are written. No more, no less."},
-                    {"role": "user", "content": prompt}
-                ],
-                reasoning={ "effort": 'medium' },
-                text={
-                    "verbosity": "low",
-                    "format": {
-                        "name": "BooleanDecree",
-                        "type": "json_schema",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "is_relevant": {"type": "boolean"},
-                                "evidence": {"type": "string", "minLength": 1}
-                            },
-                            "required": ["is_relevant", "evidence"],
-                            "additionalProperties": False,
-                        },
-                    }
-                },
+            # Use Ollama client, request JSON-formatted output on every request.
+            response = CLIENT.chat(
+                model=model,
+                messages=messages,
+                format="json",
+                options=options,
+                stream=False,
             )
-            response_text = getattr(response, 'output_text', None) or (response.choices[0].message.content if getattr(response, 'choices', None) else '')
-            parsed_json = safe_json_loads(response_text)
+            response_text = (response.get("message", {}) or {}).get("content", "") if isinstance(response, dict) else ""
 
+            parsed_json = safe_json_loads(response_text)
             if parsed_json and "is_relevant" in parsed_json:
                 relevance = parsed_json["is_relevant"]
                 evidence = parsed_json.get("evidence", "").strip()

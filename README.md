@@ -28,14 +28,32 @@ Instead of overselling relevance, the model "performs" by writing a high-quality
 
 ## Create .env
 
-Create [.env](./.env) file containing:
+Create [./.env](./.env) file containing:
 
-```md
-OPENAI_API_KEY=sk-proj-O5rq6x3C8NgCVv6jhbPaISQ4t28ty4s2SIbouDrZ_NeAByAo0P0EMLEFrUxORx-18o1wqV_UOaK7NedgNWgW-ZPFRPfh5fyuCgeJHq0qr_Zs8IDDYLc1dBHLFv9SjMFV0F2js4t36bbnVV1PTihpRnFQiOwA
+```sh
+# Optional: point to a non-standard Ollama address (IP+Port as a *single* string).
+# If omitted, defaults to 127.0.0.1:11434
+OLLAMA_HOST=172.17.0.1:11434
+
+# Controls how many tokens of *surrounding* text are given to the LLM around each 1024 token chunk
 CONTEXT_WINDOW_SIZE_TOKENS=8192
 ```
 
-Make sure to create your own API key on the openai website.
+> **Model**: This project uses **qwen3:32b** locally via **Ollama** (no cloud keys required).  
+> Pull once with:
+> ```bash
+> ollama pull qwen3:32b
+> ```
+
+The LLM is called with the following advanced options on **every request**:
+- Context Length `num_ctx = 24000`
+- `num_predict = -1`
+- `temperature = 0.6`
+- `top_k = 20`
+- `top_p = 0.95`
+- `min_p = 0`
+- `repeat_penalty = 1`
+- `num_gpu = 65`
 
 ## Search through the chunks
 First use [semantic_splitter.py](#split-the-files). Then once you have a folder [./split](./split/) containing ordered chunks of all the files, it's time to perform the deep search.
@@ -46,7 +64,7 @@ The algorithm goes through each chunk (<1024 tokens) while providing up to `CONT
 
 For example, if the current chunk is `000019.txt`, then the contents of surrounding adjacent chunks such as `[000016.txt, ..., 000019.txt, ..., 000022.txt]` will be included. This is important to give the LLM context regarding the meaning and significance of the (current) chunk of interest.
 
-We want to avoid missing any relevant information, so the script makes a new and separate `GPT-5 Nano` LLM completion request focusing on each chunk- meaning each chunk will be fed into the LLM multiple times in practice.
+We want to avoid missing any relevant information, so the script makes a new and separate LLM completion request focusing on each chunk—meaning each chunk will be fed into the LLM multiple times in practice.
 
 This is the most expensive possible way to search, and it's very unlikely to miss any relevant information about the search query.
 
@@ -94,9 +112,9 @@ Press Enter to exit.
 Refinement Query (Pass 2) >
 ```
 
-The only issue is- `GPT-4-nano` is an idiot. It not the best at instruction following, and often confuses nearby sections- ignoring the base requirement to only look at the "SECTION OF INTEREST".
+The only issue is- `GPT-5-nano` is an idiot. It not the best at instruction following, and often confuses nearby sections- ignoring the base requirement to only look at the "SECTION OF INTEREST".
 
-Disclaimer: In the above Harry Potter search, `GPT-4-nano` actually marked 9 additional results as relevant. All nearby (before and after) `002587.txt`. This caused 9 false-positives. Entirely due to the lack of instruction following displayed by `GPT-4-nano`. I had to manually edit the results to remove those false positives to avoid confusing the readers of this readme.
+Disclaimer: In the above Harry Potter search, `GPT-5-nano` actually marked 9 additional results as relevant. All nearby (before and after) `002587.txt`. This caused 9 false-positives. Entirely due to the lack of instruction following displayed by `GPT-5-nano`. I had to manually edit the results to remove those false positives to avoid confusing the readers of this readme.
 
 ## Split the file(s)
 
@@ -105,7 +123,7 @@ The input to the search are text file(s). Say you have a PDF- you'll have to fir
 Use [semantic_splitter.py](./semantic_splitter.py) utility to create a folder at [./split](./split/).
 A group of files with naming convention `[000001.txt, 000002.txt, ...]` will be created.
 
-The splitting logic is done by utilizing structured output from `GPT-5 Nano` in a recursive approach, to split the file(s) into small chunks as the LLM sees fit.
+The splitting logic is done by utilizing structured output from the LLM in a recursive approach, to split the file(s) into small chunks as the LLM sees fit.
 
 ```powershell
 PS C:\Users\user\Downloads\deep_intent_search> python semantic_splitter.py --file "C:\Users\user\Downloads\tanakh\Prophets\Amos\Hebrew\Tanach with Text Only.txt" "C:\Users\user\Downloads\tanakh\Prophets\Ezekiel\Hebrew\Tanach with Text Only.txt" [...total 39 files]
@@ -140,7 +158,7 @@ PS C:\Users\user\Downloads\deep_intent_search>
 
 ## Future Research
 
-😱 Running the tool is very expensive and slow (tested with GPT-5-nano). Estimated price $3.65 for every search pass on the 7 books of Harry Potter- and that's not including the `semantic_splitter.py` step.
+😱 Running the tool is very expensive and slow. Estimated price $3.65 (GPT-5-nano pricing) for every search pass on the 7 books of Harry Potter- and that's not including the `semantic_splitter.py` step.
 
 Given that, future project goals could be-
 - Generate an extremely high-quality dataset of search results, will require generating synthetic intent-oriented search queries. Even if the synthetic intent-oriented search queries aren't extremely high-quality, the search results are the outcome of so much processing power `ThinkingConfig(thinking_budget=-1)` that the generated dataset will contain concentrated intelligence traces.
