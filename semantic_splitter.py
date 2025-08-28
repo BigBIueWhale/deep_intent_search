@@ -266,7 +266,10 @@ Full text:
 {section_text}
 ```"""
 
-    messages = [{"role": "user", "content": prompt}]
+    messages = [
+        {"role": "system", "content": "Adhere to the instructions as they are written, respond only in JSON."},
+        {"role": "user", "content": prompt},
+    ]
     split_index = -1
     max_retries = 3
 

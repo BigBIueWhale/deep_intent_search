@@ -175,7 +175,7 @@ Respond with a JSON object in the following format and nothing else:
 """
 
     messages = [
-        {"role": "system", "content": "Adhere to the instructions as they are written. No more, no less."},
+        {"role": "system", "content": "Adhere to the instructions as they are written, respond only in JSON."},
         {"role": "user", "content": prompt},
     ]
 
