@@ -192,7 +192,7 @@ Respond with a JSON object in the following format and nothing else:
                 options=options,
                 stream=False,
             )
-            response_text = (response.get("message", {}) or {}).get("content", "") if isinstance(response, dict) else ""
+            response_text = response.message.content
 
             parsed_json = safe_json_loads(response_text)
             if parsed_json and "is_relevant" in parsed_json:

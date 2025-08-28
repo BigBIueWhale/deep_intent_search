@@ -284,7 +284,7 @@ Full text:
                 options=options, # advanced parameters on every request
                 stream=False,
             )
-            response_text = (response.get("message", {}) or {}).get("content", "") if isinstance(response, dict) else ""
+            response_text = response.message.content
 
             # qwen3 would require removing think tag (left comment; not applying transformation)
             # if response_text.strip().startswith('<think>'):
