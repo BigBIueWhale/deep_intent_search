@@ -164,7 +164,8 @@ that fits the user's query **as it is written**?
 
 Respond with a JSON object in the following format and nothing else:
 {{
-  "evidence": "<One paragraphp containing EXACTLY three short sentences.\nExtremely concise and information-dense.\nSummarize the decisive cues from the SECTION OF INTEREST only (quote key words/phrases when useful).\nIf NOT relevant, state the key reason(s) it fails; if relevant, state the key reason(s) it matches.>",
+  "summary": "<Consice ENGLISH overview of the contents of SECTION OF INTEREST (only)\nString should be one paragraphp containing EXACTLY three short sentences.\nExtremely concise and information-dense.>",
+  "evidence": "<Summarize the decisive cues from the SECTION OF INTEREST only (quote key words/phrases when useful).\nIf NOT relevant, state the key reason(s) it fails; if relevant, state the key reason(s) it matches\nString should be one paragraphp containing EXACTLY three short sentences.\nExtremely concise and information-dense.>",
   "is_relevant": <true or false>
 }}
 """
@@ -192,10 +193,13 @@ Respond with a JSON object in the following format and nothing else:
             parsed_json = safe_json_loads(response_text)
             if parsed_json and "is_relevant" in parsed_json:
                 relevance = parsed_json["is_relevant"]
-                evidence = parsed_json.get("evidence", "").strip()
                 print(f"  -> LLM decision: {'Relevant' if relevance else 'Not Relevant'}")
+                evidence = parsed_json.get("evidence", "").strip()
                 if evidence:
                     print(f"  -> Evidence: {evidence}")
+                summary = parsed_json.get("summary", "").strip()
+                if summary:
+                    print(f"  -> Summary: {summary}")
                 return bool(relevance)
             else:
                 print(f"  -> Warning (Attempt {attempt + 1}/{max_retries}): LLM response was malformed. Response: {response_text}")
