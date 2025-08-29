@@ -138,13 +138,8 @@ def check_relevance_with_llm(
     chunk_of_interest: str,
     chunk_filename: str,
     query: str,
-    max_retries: int = 3
+    max_retries: int = 5
 ) -> bool:
-    """
-    Asks the LLM to determine if a chunk is relevant to the query.
-    Also requests a 3-sentence, extremely concise, information-dense evidence summary
-    justifying the verdict, derived ONLY from the SECTION OF INTEREST.
-    """
     if not CLIENT:
         print("LLM client not initialized. Assuming relevance as a fallback.")
         return True
