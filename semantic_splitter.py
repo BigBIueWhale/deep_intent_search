@@ -19,6 +19,23 @@ MAX_TOKENS_PER_CHUNK = 1024
 
 # --- Helper Functions ---
 
+def print_bounded_anchor(anchor: str, maxlen: int = 140) -> None:
+    """
+    Prints a compact, single-line, clearly bounded preview of an anchor string.
+    Escapes control characters and trims while keeping both ends visible.
+    """
+    s = anchor or ""
+    preview = (
+        s.replace("\\", "\\\\")
+         .replace("\n", r"\n")
+         .replace("\r", r"\r")
+         .replace("\t", r"\t")
+    )
+    if len(preview) > maxlen:
+        half = maxlen // 2
+        preview = f"{preview[:half]} … {preview[-half:]}"
+    print(f"[BEGIN_ANCHOR len={len(s)}]{preview}[END_ANCHOR]")
+
 def custom_span_tokenize(text: str) -> list[tuple[int, int]]:
     """
     A custom implementation that mimics NLTK's span_tokenize but uses
@@ -327,6 +344,7 @@ Full text:
                 else:
                     print(f"Warning (Attempt {attempt + 1}): LLM-suggested string not found in text.")
                     print(f"  -> Thinking tokens: {thinking_tokens:,}")
+                    print_bounded_anchor(split_string)
             else:
                 print(f"Warning (Attempt {attempt + 1}): LLM response did not contain 'begin_second_section'.")
                 print(f"  -> Thinking tokens: {thinking_tokens:,}")
@@ -421,7 +439,7 @@ if __name__ == "__main__":
         # --- Saving Output Chunks for the current file ---
         for i, chunk in enumerate(chunks):
             global_chunk_counter += 1
-            chunk_num_for_file = i + 1
+            chunk_num_for_this_file = i + 1
 
             # Format the filename with a global, incrementing counter
             output_filename = os.path.join(output_dir, f"{str(global_chunk_counter).zfill(6)}.txt")
