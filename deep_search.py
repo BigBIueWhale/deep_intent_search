@@ -8,8 +8,8 @@ from typing import List, Dict, Any, Optional
 
 # NOTE: Centralized utilities (as requested)
 from dotenv import load_dotenv
-from core.tokens import count_tokens  # centralized token counting (Qwen tokenizer)
-from core.llm import get_client, get_model_name, get_ollama_options  # centralized LLM access
+from core.tokens import count_tokens
+from core.llm import get_client, get_model_name, get_ollama_options, print_stats
 
 # --- Setup ---
 # Load environment variables from a .env file for security.
@@ -190,10 +190,13 @@ Respond with a JSON object in the following format and nothing else:
                 stream=False,
                 think=True,
             )
+            print("", end='\n\n')
+            stats = print_stats(response)
+            if stats:
+                print(stats)
             response_text = response.message.content
 
             thinking_text = response.message.thinking
-            thinking_tokens = count_tokens(thinking_text) if thinking_text else 0
 
             parsed_json = safe_json_loads(response_text)
             if parsed_json and "is_relevant" in parsed_json:
@@ -205,11 +208,9 @@ Respond with a JSON object in the following format and nothing else:
                 summary = parsed_json.get("summary", "").strip()
                 if summary:
                     print(f"  -> Summary: {summary}")
-                print(f"  -> Thinking tokens: {thinking_tokens:,}")
                 return bool(relevance)
             else:
                 print(f"  -> Warning (Attempt {attempt + 1}/{max_retries}): LLM response was malformed. Response: {response_text}")
-                print(f"  -> Thinking tokens: {thinking_tokens:,}")
                 # Nicely print the entire thinking output to aid debugging.
                 if thinking_text:
                     print("\n" + "-" * 80)

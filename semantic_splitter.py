@@ -4,7 +4,7 @@ import argparse
 from dotenv import load_dotenv
 
 from core.tokens import count_tokens
-from core.llm import get_client, get_model_name, get_ollama_options
+from core.llm import get_client, get_model_name, get_ollama_options, print_stats
 
 # --- Setup ---
 # Load environment variables from a .env file for security
@@ -19,6 +19,7 @@ MAX_TOKENS_PER_CHUNK = 1024
 
 # --- Helper Functions ---
 
+# For debug only
 def print_bounded_anchor(anchor: str, maxlen: int = 140) -> None:
     """
     Prints a compact, single-line, clearly bounded preview of an anchor string.
@@ -306,10 +307,11 @@ Full text:
                 stream=False,
                 think=True,
             )
+            
+            stats = print_stats(response)
+            if stats:
+                print(stats)
             response_text = response.message.content
-
-            thinking_text = response.message.thinking
-            thinking_tokens = count_tokens(thinking_text) if thinking_text else 0
 
             json_start = response_text.find('{')
             if json_start != -1:
@@ -333,25 +335,20 @@ Full text:
                         percentage = (found_index / text_len) * 100
                         print(f"Warning (Attempt {attempt + 1}): LLM proposed a highly imbalanced split ({percentage:.2f}%) of {text_len} chars. Discarding.")
                         # By continuing, we treat this as a failed attempt, allowing retries or the fallback to trigger.
-                        print(f"  -> Thinking tokens: {thinking_tokens:,}")
                         continue
                     else:
                         split_index = found_index
                         percentage = (split_index / text_len) * 100 if text_len > 0 else 0
                         print(f"LLM identified a valid split point. Split {text_len} chars at {split_index} ({percentage:.1f}%).")
-                        print(f"  -> Thinking tokens: {thinking_tokens:,}")
                         break  # Success, exit the retry loop
                 else:
                     print(f"Warning (Attempt {attempt + 1}): LLM-suggested string not found in text.")
-                    print(f"  -> Thinking tokens: {thinking_tokens:,}")
                     print_bounded_anchor(split_string)
             else:
                 print(f"Warning (Attempt {attempt + 1}): LLM response did not contain 'begin_second_section'.")
-                print(f"  -> Thinking tokens: {thinking_tokens:,}")
 
         except (json.JSONDecodeError, AttributeError, Exception) as e:
             print(f"Warning (Attempt {attempt + 1}): An API or JSON parsing error occurred: {e}.")
-            print(f"  -> Thinking tokens: {thinking_tokens:,}")
 
         if attempt < max_retries - 1:
             print("Retrying LLM call...")

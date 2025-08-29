@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 import ollama
+from core.tokens import count_tokens
 
 # Load env once here; callers can also call load_dotenv earlier safely.
 load_dotenv()
@@ -56,3 +57,15 @@ def get_ollama_options() -> dict:
     tweak or swap models later without touching the scripts.
     """
     return dict(_QWEN3_32B_OPTIONS)
+
+# For debug statistics
+def print_stats(response: ollama.ChatResponse) -> str | None:
+    if None in [response.prompt_eval_duration, response.prompt_eval_count,
+                response.eval_duration, response.eval_count]:
+        return None
+    prefill_speed = response.prompt_eval_count / (response.prompt_eval_duration / 1e9)
+    generation_speed = response.eval_count / (response.eval_duration / 1e9)
+    thinking_text = response.message.thinking
+    thinking_tokens = count_tokens(thinking_text) if thinking_text else 0
+    return f"prefill_speed: {prefill_speed:.2f}(tok/sec), generation_speed: {generation_speed:.2f}(tok/sec)" + \
+          f"\nprompt: {response.prompt_eval_count}(tok), think: {thinking_tokens}(tok) + response: {response.eval_count - thinking_tokens}(tok)"

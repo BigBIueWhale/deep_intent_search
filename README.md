@@ -39,7 +39,7 @@ OLLAMA_HOST=172.17.0.1:11434
 CONTEXT_WINDOW_SIZE_TOKENS=8192
 ```
 
-> **Model**: This project uses **qwen3:32b** locally via **Ollama** (no cloud keys required).  
+> **Model**: This project uses **qwen3:32b** locally via **Ollama v0.11.7** (no cloud keys required).  
 > Pull once with:
 > ```bash
 > ollama pull qwen3:32b
