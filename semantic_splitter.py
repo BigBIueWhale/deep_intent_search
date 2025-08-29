@@ -291,9 +291,9 @@ Full text:
             )
             response_text = response.message.content
 
-            # qwen3 would require removing think tag (left comment; not applying transformation)
-            # if response_text.strip().startswith('<think>'):
-            #     response_text = response_text.split('</think>', 1)[-1]
+            thinking_text = response.message.thinking
+            thinking_tokens = count_tokens(thinking_text) if thinking_text else 0
+
             json_start = response_text.find('{')
             if json_start != -1:
                 response_text = response_text[json_start:]
@@ -316,19 +316,24 @@ Full text:
                         percentage = (found_index / text_len) * 100
                         print(f"Warning (Attempt {attempt + 1}): LLM proposed a highly imbalanced split ({percentage:.2f}%) of {text_len} chars. Discarding.")
                         # By continuing, we treat this as a failed attempt, allowing retries or the fallback to trigger.
+                        print(f"  -> Thinking tokens: {thinking_tokens:,}")
                         continue
                     else:
                         split_index = found_index
                         percentage = (split_index / text_len) * 100 if text_len > 0 else 0
                         print(f"LLM identified a valid split point. Split {text_len} chars at {split_index} ({percentage:.1f}%).")
+                        print(f"  -> Thinking tokens: {thinking_tokens:,}")
                         break  # Success, exit the retry loop
                 else:
                     print(f"Warning (Attempt {attempt + 1}): LLM-suggested string not found in text.")
+                    print(f"  -> Thinking tokens: {thinking_tokens:,}")
             else:
                 print(f"Warning (Attempt {attempt + 1}): LLM response did not contain 'begin_second_section'.")
+                print(f"  -> Thinking tokens: {thinking_tokens:,}")
 
         except (json.JSONDecodeError, AttributeError, Exception) as e:
             print(f"Warning (Attempt {attempt + 1}): An API or JSON parsing error occurred: {e}.")
+            print(f"  -> Thinking tokens: {thinking_tokens:,}")
 
         if attempt < max_retries - 1:
             print("Retrying LLM call...")
@@ -422,7 +427,7 @@ if __name__ == "__main__":
             output_filename = os.path.join(output_dir, f"{str(global_chunk_counter).zfill(6)}.txt")
 
             # Create the header with the file-specific chunk count
-            header = f"SOURCE {input_filename} (Chunk {chunk_num_for_file}/{num_chunks_for_this_file})\n"
+            header = f"SOURCE {input_filename} (Chunk {chunk_num_for_this_file}/{num_chunks_for_this_file})\n"
 
             with open(output_filename, "w", encoding="utf-8") as fw:
                 # Prepend the new header
@@ -430,7 +435,7 @@ if __name__ == "__main__":
                 fw.write(chunk)
 
             chunk_token_count = count_tokens(chunk)
-            print(f"Saved chunk {chunk_num_for_file}/{num_chunks_for_this_file} to '{output_filename}' (from '{input_filename}', Tokens: {chunk_token_count})")
+            print(f"Saved chunk {chunk_num_for_this_file}/{num_chunks_for_this_file} to '{output_filename}' (from '{input_filename}', Tokens: {chunk_token_count})")
 
         # Add a newline for better visual separation between file processing in the console
         if num_chunks_for_this_file > 0:

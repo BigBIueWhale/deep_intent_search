@@ -192,6 +192,9 @@ Respond with a JSON object in the following format and nothing else:
             )
             response_text = response.message.content
 
+            thinking_text = response.message.thinking
+            thinking_tokens = count_tokens(thinking_text) if thinking_text else 0
+
             parsed_json = safe_json_loads(response_text)
             if parsed_json and "is_relevant" in parsed_json:
                 relevance = parsed_json["is_relevant"]
@@ -202,9 +205,18 @@ Respond with a JSON object in the following format and nothing else:
                 summary = parsed_json.get("summary", "").strip()
                 if summary:
                     print(f"  -> Summary: {summary}")
+                print(f"  -> Thinking tokens: {thinking_tokens:,}")
                 return bool(relevance)
             else:
                 print(f"  -> Warning (Attempt {attempt + 1}/{max_retries}): LLM response was malformed. Response: {response_text}")
+                print(f"  -> Thinking tokens: {thinking_tokens:,}")
+                # Nicely print the entire thinking output to aid debugging.
+                if thinking_text:
+                    print("\n" + "-" * 80)
+                    print("THINKING (debug):")
+                    print("-" * 80)
+                    print(thinking_text)
+                    print("-" * 80 + "\n")
 
         except Exception as e:
             print(f"  -> An error occurred on attempt {attempt + 1}/{max_retries}: {e}")
