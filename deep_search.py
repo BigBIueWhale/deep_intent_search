@@ -164,8 +164,8 @@ that fits the user's query **as it is written**?
 
 Respond with a JSON object in the following format and nothing else:
 {{
-  "is_relevant": <true or false>,
-  "evidence": "<One paragraphp containing EXACTLY three short sentences.\nExtremely concise and information-dense.\nSummarize the decisive cues from the SECTION OF INTEREST only (quote key words/phrases when useful).\nIf NOT relevant, state the key reason(s) it fails; if relevant, state the key reason(s) it matches.>"
+  "evidence": "<One paragraphp containing EXACTLY three short sentences.\nExtremely concise and information-dense.\nSummarize the decisive cues from the SECTION OF INTEREST only (quote key words/phrases when useful).\nIf NOT relevant, state the key reason(s) it fails; if relevant, state the key reason(s) it matches.>",
+  "is_relevant": <true or false>
 }}
 """
 
