@@ -308,6 +308,7 @@ Full text:
                 think=True,
             )
             
+            print("", end='\n')
             stats = print_stats(response)
             if stats:
                 print(stats)

@@ -190,7 +190,6 @@ Respond with a JSON object in the following format and nothing else:
                 stream=False,
                 think=True,
             )
-            print("", end='\n\n')
             stats = print_stats(response)
             if stats:
                 print(stats)
