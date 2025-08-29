@@ -184,9 +184,11 @@ Respond with a JSON object in the following format and nothing else:
             response = CLIENT.chat(
                 model=model,
                 messages=messages,
-                format="json",
+                # Don't use format="json" because that disables thinking
+                # format="json",
                 options=options,
                 stream=False,
+                think=True,
             )
             response_text = response.message.content
 

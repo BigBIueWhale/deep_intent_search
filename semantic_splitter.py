@@ -283,9 +283,11 @@ Full text:
             response = client.chat(
                 model=model,
                 messages=messages,
-                format="json",   # request strict JSON
+                # Don't use format="json" because that disables thinking
+                # format="json",
                 options=options, # advanced parameters on every request
                 stream=False,
+                think=True,
             )
             response_text = response.message.content
 
