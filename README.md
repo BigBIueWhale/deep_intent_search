@@ -35,11 +35,11 @@ Create `./.env` with:
 # If omitted, defaults to 127.0.0.1:11434
 #OLLAMA_HOST=172.17.0.1:11434
 
-# Optional: Customize timeout on Ollama request
-# Defaults to 5 minutes.
+# Optional: Customize timeout value in seconds for each Ollama request
+# Defaults to give minutes.
 # This functionality is required to avoid Ollama bug where it sometimes
 # just forgets about our request, and leaves our script hanging forever.
-#OLLAMA_TIMEOUT_SECONDS=300 # seconds
+#OLLAMA_TIMEOUT_SECONDS=300
 
 # Controls how many tokens of surrounding text are given to the LLM around each 1024 token chunk
 CONTEXT_WINDOW_SIZE_TOKENS=8192
