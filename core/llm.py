@@ -1,12 +1,20 @@
+# /core/llm.py
+
 import os
+import re
+import time
+from dataclasses import dataclass
+from typing import Any, Optional
+
+import httpx
 from dotenv import load_dotenv
-import ollama
 from core.tokens import count_tokens
 
 # Load env once here; callers can also call load_dotenv earlier safely.
 load_dotenv()
 
-# --- Configuration ---
+
+# --- Configuration & helpers ---
 
 def _normalize_host(raw: str | None) -> str:
     """
@@ -19,19 +27,60 @@ def _normalize_host(raw: str | None) -> str:
         host = f"{host}:11434"
     if not host.startswith("http://") and not host.startswith("https://"):
         host = f"http://{host}"
-    return host
+    return host.rstrip("/")
 
-def get_client() -> ollama.Client | None:
+
+def _base_url() -> str:
+    return _normalize_host(os.environ.get("OLLAMA_HOST"))
+
+
+def _request_timeout_seconds() -> float:
+    # Hard ceiling so calls cannot hang forever.
+    # You can override in .env; defaults are generous for large models.
+    return float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "300"))  # 5 minutes
+
+
+# --- Public API compatibility layer ---
+
+@dataclass
+class _Message:
+    role: str = "assistant"
+    content: str = ""
+    thinking: Optional[str] = None  # extracted if available (or from <think>...</think>)
+
+
+@dataclass
+class ChatResponse:
     """
-    Singleton-style accessor for the Ollama client. No raw HTTP is used.
+    Drop-in stand-in for `ollama.ChatResponse` attributes your code uses.
     """
-    host = _normalize_host(os.environ.get("OLLAMA_HOST"))
+    message: _Message
+    # The following names match your print_stats() expectations
+    prompt_eval_duration: Optional[int] = None   # nanoseconds
+    prompt_eval_count: Optional[int] = None
+    eval_duration: Optional[int] = None          # nanoseconds (includes think+response)
+    eval_count: Optional[int] = None             # tokens generated (incl. think where applicable)
+
+
+def get_client() -> httpx.Client | None:
+    """
+    Returns a configured httpx.Client. Keeping the name for backward compatibility.
+    """
+    # httpx separates connect/read/write; we use a firm read timeout as our "total" cap
+    timeout_total = _request_timeout_seconds()
     try:
-        return ollama.Client(host=host)
+        client = httpx.Client(
+            timeout=httpx.Timeout(
+                connect=10.0,    # fail fast if daemon is down
+                read=timeout_total,  # cap total wait on non-stream responses
+                write=10.0,
+                pool=None,       # default pool is fine; leaving explicit for clarity
+            )
+        )
+        return client
     except Exception as e:
-        print(f"Error initializing Ollama client at {host}: {e}")
-        return None
-
+        raise RuntimeError(f"Error initializing httpx client for Ollama at {_base_url()}: {e}")
+    
 def get_model_name(role: str | None = None) -> str:
     """
     Role must be 'judge' or 'splitter'. No fallback. Force explicit config.
@@ -108,43 +157,116 @@ def _supports_thinking(model: str) -> bool:
         "qwen3:30b-a3b-thinking-2507-q4_K_M",
     }
 
+
+_THINK_TAG_RE = re.compile(r"<think>(.*?)</think>", flags=re.DOTALL | re.IGNORECASE)
+
+
+def _extract_thinking(message_obj: dict, can_think: bool, content: str) -> Optional[str]:
+    """
+    Extract a 'thinking' trace if present. Ollama sometimes emits it as a separate
+    field, or inline inside <think>...</think> tags. We support both.
+    """
+    # 1) explicit field (future / variant-friendly)
+    if isinstance(message_obj, dict) and "thinking" in message_obj:
+        if isinstance(message_obj["thinking"], str):
+            return message_obj["thinking"]
+
+    # 2) inline tags
+    if can_think and content:
+        m = _THINK_TAG_RE.search(content)
+        if m:
+            return m.group(1).strip()
+
+    return None
+
+
 def chat_complete(
     messages: list[dict],
     role: str,
-    client: ollama.Client,
+    client: httpx.Client,
     require_json: bool = True,
-) -> ollama.ChatResponse:
+) -> ChatResponse:
     """
+    Non-streaming call to Ollama's /api/chat using httpx, with hard read timeout.
+    Not using Ollama's official Python client because it doesn't provide a timeout option.
     Single entrypoint so callers do not duplicate flags:
     - thinking is enabled for thinking-capable models only
     - when not thinking and JSON is desired, we set format="json"
     """
+    if client is None:
+        raise RuntimeError("httpx client is not initialized")
+
     model = get_model_name(role)
     options = get_ollama_options(model)
     can_think = _supports_thinking(model)
 
-    kwargs = {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "options": options,
         "stream": False,
-        "think": can_think,
     }
-    # Strict JSON output enforced by Ollama doesn't work
-    # together with "<think>" tags.
-    if require_json and not can_think:
-        kwargs["format"] = "json"
 
-    return client.chat(**kwargs)
+    # Strict JSON output enforced by Ollama doesn't work together with "<think>" tags.
+    if require_json and not can_think:
+        payload["format"] = "json"
+
+    # Simulate Ollama response structure
+    if can_think:
+        payload["think"] = True
+
+    url = f"{_base_url()}/api/chat"
+
+    # Make the request; httpx read-timeout caps total wait for the non-streaming body.
+    # If Ollama wedges without sending bytes, you get a TimeoutException instead of a forever hang.
+    resp = client.post(url, json=payload)
+    resp.raise_for_status()
+    data = resp.json()
+
+    # Build a compatibility response
+    msg = data.get("message") or {}
+    content = msg.get("content") or ""
+
+    thinking_text = _extract_thinking(msg, can_think, content)
+
+    # Stats: use Ollama JSON keys if present; set None otherwise
+    # Units from Ollama are nanoseconds for *_duration fields.
+    prompt_eval_duration = data.get("prompt_eval_duration")
+    prompt_eval_count = data.get("prompt_eval_count")
+    eval_duration = data.get("eval_duration")
+    eval_count = data.get("eval_count")
+
+    # Simulate Ollama response structure
+    return ChatResponse(
+        message=_Message(
+            role=msg.get("role", "assistant"),
+            content=content,
+            thinking=thinking_text,
+        ),
+        prompt_eval_duration=prompt_eval_duration,
+        prompt_eval_count=prompt_eval_count,
+        eval_duration=eval_duration,
+        eval_count=eval_count,
+    )
+
 
 # For debug statistics
-def print_stats(response: ollama.ChatResponse) -> str | None:
+def print_stats(response: ChatResponse) -> str | None:
     if None in [response.prompt_eval_duration, response.prompt_eval_count,
                 response.eval_duration, response.eval_count]:
         return None
-    prefill_speed = response.prompt_eval_count / (response.prompt_eval_duration / 1e9)
-    generation_speed = response.eval_count / (response.eval_duration / 1e9)
-    thinking_text = response.message.thinking
+    try:
+        prefill_speed = response.prompt_eval_count / (response.prompt_eval_duration / 1e9)
+        generation_speed = response.eval_count / (response.eval_duration / 1e9)
+    except ZeroDivisionError:
+        prefill_speed = 0.0
+        generation_speed = 0.0
+
+    thinking_text = response.message.thinking or ""
     thinking_tokens = count_tokens(thinking_text) if thinking_text else 0
-    return f"prefill_speed: {prefill_speed:.2f}(tok/sec), generation_speed: {generation_speed:.2f}(tok/sec)" + \
-          f"\nprompt: {response.prompt_eval_count}(tok), think: {thinking_tokens}(tok) + response: {response.eval_count - thinking_tokens}(tok)"
+    return (
+        f"prefill_speed: {prefill_speed:.2f}(tok/sec), "
+        f"generation_speed: {generation_speed:.2f}(tok/sec)"
+        + f"\nprompt: {response.prompt_eval_count}(tok), "
+        f"think: {thinking_tokens}(tok) + response: {response.eval_count - thinking_tokens}(tok)"
+    )
