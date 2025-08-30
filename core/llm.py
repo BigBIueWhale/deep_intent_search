@@ -42,7 +42,13 @@ def get_model_name() -> str:
 # Advanced parameters for qwen3:32b (applied on every request)
 _QWEN3_32B_OPTIONS = {
     "num_ctx": 24000,       # Context Length
-    "num_predict": -1,      # No explicit cap
+    # Setting -1 (infinite) would cause infinite generation once in a while.
+    # Infinite generations are observed to be exactly 239,998 thinking tokens
+    # plus 2 response tokens.
+    # To avoid the issue of Ollama call getting stuck waiting for almost 2 hours,
+    # grinding the GPU for nothing, we'll set num_predict to a value greater then
+    # the longest successful response I've observed so far (6659 tokens).
+    "num_predict": 8192,
     "temperature": 0.6,
     "top_k": 20,
     "top_p": 0.95,
