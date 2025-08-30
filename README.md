@@ -54,8 +54,8 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 # Usage:
 #   - OLLAMA_MODEL_JUDGE is used by deep_search.py (relevance judging)
 #   - OLLAMA_MODEL_SPLITTER is used by semantic_splitter.py (chunk boundary finder)
-OLLAMA_MODEL_JUDGE=gemma3:27b
-OLLAMA_MODEL_SPLITTER=qwen3:32b
+OLLAMA_MODEL_JUDGE=qwen3:32b
+OLLAMA_MODEL_SPLITTER=gemma3:27b
 ```
 
 > Pull models once:
