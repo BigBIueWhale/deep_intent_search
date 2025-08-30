@@ -6,10 +6,9 @@ import argparse
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
-# NOTE: Centralized utilities (as requested)
 from dotenv import load_dotenv
 from core.tokens import count_tokens
-from core.llm import get_client, get_model_name, get_ollama_options, print_stats
+from core.llm import get_client, print_stats, chat_complete
 
 # --- Setup ---
 # Load environment variables from a .env file for security.
@@ -175,26 +174,13 @@ Respond with a JSON object in the following format and nothing else:
         {"role": "user", "content": prompt},
     ]
 
-    options = get_ollama_options()
-    model = get_model_name()
-
     for attempt in range(max_retries):
         try:
-            # Use Ollama client, request JSON-formatted output on every request.
-            response = CLIENT.chat(
-                model=model,
-                messages=messages,
-                # Don't use format="json" because that disables thinking
-                # format="json",
-                options=options,
-                stream=False,
-                think=True,
-            )
+            response = chat_complete(messages=messages, role="judge", client=CLIENT, require_json=True)
             stats = print_stats(response)
             if stats:
                 print(stats)
             response_text = response.message.content
-
             thinking_text = response.message.thinking
 
             parsed_json = safe_json_loads(response_text)
@@ -210,7 +196,7 @@ Respond with a JSON object in the following format and nothing else:
                 return bool(relevance)
             else:
                 print(f"  -> Warning (Attempt {attempt + 1}/{max_retries}): LLM response was malformed. Response: {response_text}")
-                # Nicely print the entire thinking output to aid debugging.
+                # Aid debugging for thinking models
                 if thinking_text:
                     print("\n" + "-" * 80)
                     print("THINKING (debug):")

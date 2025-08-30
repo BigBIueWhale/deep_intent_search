@@ -4,7 +4,7 @@ import argparse
 from dotenv import load_dotenv
 
 from core.tokens import count_tokens
-from core.llm import get_client, get_model_name, get_ollama_options, print_stats
+from core.llm import get_client, print_stats, chat_complete
 
 # --- Setup ---
 # Load environment variables from a .env file for security
@@ -291,23 +291,9 @@ Full text:
     split_index = -1
     max_retries = 3
 
-    model = get_model_name()
-    options = get_ollama_options()
-
-    # 1. Call the LLM to find the optimal split point.
     for attempt in range(max_retries):
         try:
-            # Generate content using Ollama
-            response = client.chat(
-                model=model,
-                messages=messages,
-                # Don't use format="json" because that disables thinking
-                # format="json",
-                options=options, # advanced parameters on every request
-                stream=False,
-                think=True,
-            )
-            
+            response = chat_complete(messages=messages, role="splitter", client=client, require_json=True)
             print("", end='\n')
             stats = print_stats(response)
             if stats:

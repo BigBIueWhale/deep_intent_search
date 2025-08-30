@@ -28,28 +28,35 @@ Instead of overselling relevance, the model "performs" by writing a high-quality
 
 ## Create .env
 
-Create [./.env](./.env) file containing:
+Create `./.env` with:
 
 ```sh
-# Optional: point to a non-standard Ollama address (IP+Port as a *single* string).
+# Optional: point to a non-standard Ollama address (IP+Port as a single string).
 # If omitted, defaults to 127.0.0.1:11434
 OLLAMA_HOST=172.17.0.1:11434
 
-# Controls how many tokens of *surrounding* text are given to the LLM around each 1024 token chunk
+# Controls how many tokens of surrounding text are given to the LLM around each 1024 token chunk
 CONTEXT_WINDOW_SIZE_TOKENS=8192
 
-# Model selection (optional)
+# Model selection (required)
+# You must set both variables explicitly. There is no fallback.
 # Allowed values:
-#   - qwen3:32b   (default if unset/empty)
+#   - qwen3:32b
 #   - qwen3:30b-a3b-thinking-2507-q4_K_M
-OLLAMA_MODEL=qwen3:32b
+#   - gemma3:27b
+#
+# Usage:
+#   - OLLAMA_MODEL_JUDGE is used by deep_search.py (relevance judging)
+#   - OLLAMA_MODEL_SPLITTER is used by semantic_splitter.py (chunk boundary finder)
+OLLAMA_MODEL_JUDGE=qwen3:32b
+OLLAMA_MODEL_SPLITTER=qwen3:32b
 ```
 
-> **Model**: This project uses **qwen3** locally via **Ollama v0.11.7** (no cloud keys required).
-> Pull once with:
+> Pull models once:
 > ```bash
-> ollama pull qwen3:32b # Default
+> ollama pull qwen3:32b
 > ollama pull qwen3:30b-a3b-thinking-2507-q4_K_M
+> ollama pull gemma3:27b
 > ```
 
 The LLM is called with the following advanced options on **every request**:
@@ -61,6 +68,15 @@ The LLM is called with the following advanced options on **every request**:
 - `min_p = 0`
 - `repeat_penalty = 1`
 - `num_gpu = 65`
+
+## Per-model options
+
+- qwen3 models are thinking-capable in this project. Thinking is enabled through a single helper so callers do not duplicate flags.
+- gemma3:27b is not a thinking model here.
+
+Both tools call a single helper that chooses the right mode:
+- judge role (deep_search.py)
+- splitter role (semantic_splitter.py)
 
 ## Search through the chunks
 First use [semantic_splitter.py](#split-the-files). Then once you have a folder [./split](./split/) containing ordered chunks of all the files, it's time to perform the deep search.

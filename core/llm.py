@@ -32,12 +32,19 @@ def get_client() -> ollama.Client | None:
         print(f"Error initializing Ollama client at {host}: {e}")
         return None
 
-def get_model_name() -> str:
+def get_model_name(role: str | None = None) -> str:
     """
-    Centralized model name for easy switching later.
-    Defaults to qwen3:32b as requested.
+    Role must be 'judge' or 'splitter'. No fallback. Force explicit config.
     """
-    return os.environ.get("OLLAMA_MODEL", "qwen3:32b")
+    if role not in {"judge", "splitter"}:
+        raise ValueError("get_model_name(role): role must be 'judge' or 'splitter'.")
+
+    env_key = "OLLAMA_MODEL_JUDGE" if role == "judge" else "OLLAMA_MODEL_SPLITTER"
+    name = os.environ.get(env_key, "").strip()
+    if not name:
+        raise ValueError(f"Missing required env var {env_key}. See README for .env options")
+    
+    return name
 
 # Advanced parameters for qwen3:32b (applied on every request)
 _QWEN3_32B_OPTIONS = {
@@ -75,15 +82,58 @@ _QWEN3_30B_A3B_OPTIONS = {
     "num_gpu": 49, # Layers to offload, all of them.
 }
 
-def get_ollama_options() -> dict:
-    val = os.environ.get("OLLAMA_MODEL")
-    if not val or val == "qwen3:32b":
+_GEMMA3_27B_OPTIONS = {
+    "num_ctx": 14000,
+    # Any more than this is undefined behaviour according to Google
+    # The model was never trained on outputting more than 8192 tokens.
+    "num_predict": 8192,
+}
+
+def get_ollama_options(model: str) -> dict:
+    if model == "qwen3:32b":
         return dict(_QWEN3_32B_OPTIONS)
-    if val == "qwen3:30b-a3b-thinking-2507-q4_K_M":
+    if model == "qwen3:30b-a3b-thinking-2507-q4_K_M":
         return dict(_QWEN3_30B_A3B_OPTIONS)
+    if model == "gemma3:27b":
+        return dict(_GEMMA3_27B_OPTIONS)
     raise ValueError(
-        f"Unrecognized OLLAMA_MODEL '{val}'. See README for .env options"
+        f"Unrecognized OLLAMA_MODEL '{model}'. See README for .env options"
     )
+
+def _supports_thinking(model: str) -> bool:
+    return model in {
+        "qwen3:32b",
+        "qwen3:30b-a3b-thinking-2507-q4_K_M",
+    }
+
+def chat_complete(
+    messages: list[dict],
+    role: str,
+    client: ollama.Client,
+    require_json: bool = True,
+) -> ollama.ChatResponse:
+    """
+    Single entrypoint so callers do not duplicate flags:
+    - thinking is enabled for thinking-capable models only
+    - when not thinking and JSON is desired, we set format="json"
+    """
+    model = get_model_name(role)
+    options = get_ollama_options(model)
+    can_think = _supports_thinking(model)
+
+    kwargs = {
+        "model": model,
+        "messages": messages,
+        "options": options,
+        "stream": False,
+        "think": can_think,
+    }
+    # Strict JSON output enforced by Ollama doesn't work
+    # together with "<think>" tags.
+    if require_json and not can_think:
+        kwargs["format"] = "json"
+
+    return client.chat(**kwargs)
 
 # For debug statistics
 def print_stats(response: ollama.ChatResponse) -> str | None:
