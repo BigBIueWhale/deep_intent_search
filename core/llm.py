@@ -83,7 +83,9 @@ _QWEN3_30B_A3B_OPTIONS = {
 }
 
 _GEMMA3_27B_OPTIONS = {
-    "num_ctx": 14000,
+    # Good context length value for 32GB VRAM and flash attention enabled
+    # Ends up using ~32 GB in "ollama ps" when context length is full.
+    "num_ctx": 81920,
     # Any more than this is undefined behaviour according to Google
     # The model was never trained on outputting more than 8192 tokens.
     "num_predict": 8192,
