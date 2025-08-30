@@ -37,12 +37,19 @@ OLLAMA_HOST=172.17.0.1:11434
 
 # Controls how many tokens of *surrounding* text are given to the LLM around each 1024 token chunk
 CONTEXT_WINDOW_SIZE_TOKENS=8192
+
+# Model selection (optional)
+# Allowed values:
+#   - qwen3:32b   (default if unset/empty)
+#   - qwen3:30b-a3b-thinking-2507
+OLLAMA_MODEL=qwen3:32b
 ```
 
-> **Model**: This project uses **qwen3:32b** locally via **Ollama v0.11.7** (no cloud keys required).  
+> **Model**: This project uses **qwen3** locally via **Ollama v0.11.7** (no cloud keys required).
 > Pull once with:
 > ```bash
-> ollama pull qwen3:32b
+> ollama pull qwen3:32b # Default
+> ollama pull qwen3:30b-a3b-thinking-2507-q4_K_M
 > ```
 
 The LLM is called with the following advanced options on **every request**:

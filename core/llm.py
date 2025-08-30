@@ -41,28 +41,56 @@ def get_model_name() -> str:
 
 # Advanced parameters for qwen3:32b (applied on every request)
 _QWEN3_32B_OPTIONS = {
-    "num_ctx": 24000,       # Context Length
+    # Good context length value for 32GB VRAM and flash attention enabled
+    # Ends up using ~31 GB in "ollama ps" when context length is full.
+    "num_ctx": 19456, # 19k
     # Setting -1 (infinite) would cause infinite generation once in a while.
     # Infinite generations are observed to be exactly 239,998 thinking tokens
     # plus 2 response tokens.
-    # To avoid the issue of Ollama call getting stuck waiting for almost 2 hours,
-    # grinding the GPU for nothing, we'll set num_predict to a value greater then
-    # the longest successful response I've observed so far (6659 tokens).
-    "num_predict": 8192,
+    # Avoid the issue of Ollama call getting stuck waiting for almost 2 hours,
+    # grinding the GPU for nothing on gibberish.
+    "num_predict": 11264,
     "temperature": 0.6,
     "top_k": 20,
     "top_p": 0.95,
     "min_p": 0.0,
     "repeat_penalty": 1.0,
-    "num_gpu": 65,          # Layers to offload
+    "num_gpu": 65, # Layers to offload, all of them.
+}
+
+# Advanced parameters for qwen3:30b-a3b-thinking-2507 (applied on every request).
+# Not the default, because it's much worse at instruction following.
+# For example, the 30B_A3B version will often justify relevance based on content
+# outside of the section of interest.
+_QWEN3_30B_A3B_OPTIONS = {
+    # Good context length value for 32GB VRAM and flash attention enabled
+    # Ends up using ~31 GB in "ollama ps" when context length is full.
+    "num_ctx": 57344, # 56k
+    "num_predict": 49152, # 30b-a3b tends to think a lot
+    "temperature": 0.6,
+    "top_k": 20,
+    "top_p": 0.95,
+    "min_p": 0.0,
+    "repeat_penalty": 1.0,
+    "num_gpu": 49, # Layers to offload, all of them.
 }
 
 def get_ollama_options() -> dict:
     """
-    Returns the per-request options dict for Ollama. Centralized so we can
-    tweak or swap models later without touching the scripts.
+    Returns the per-request options dict for Ollama.
+    Performs an exact-match check on OLLAMA_MODEL:
+      - unset/empty or 'qwen3:32b' -> 32B options
+      - 'qwen3:30b-a3b-thinking-2507' -> 30B-A3B options
+      - anything else -> ValueError
     """
-    return dict(_QWEN3_32B_OPTIONS)
+    val = os.environ.get("OLLAMA_MODEL")
+    if not val or val == "qwen3:32b":
+        return dict(_QWEN3_32B_OPTIONS)
+    if val == "qwen3:30b-a3b-thinking-2507":
+        return dict(_QWEN3_30B_A3B_OPTIONS)
+    raise ValueError(
+        f"Unrecognized OLLAMA_MODEL '{val}'. Allowed: 'qwen3:32b', 'qwen3:30b-a3b-thinking-2507', or unset/empty."
+    )
 
 # For debug statistics
 def print_stats(response: ollama.ChatResponse) -> str | None:

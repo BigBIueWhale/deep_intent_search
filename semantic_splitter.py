@@ -297,7 +297,7 @@ Full text:
     # 1. Call the LLM to find the optimal split point.
     for attempt in range(max_retries):
         try:
-            # Generate content using Ollama (qwen3:32b)
+            # Generate content using Ollama
             response = client.chat(
                 model=model,
                 messages=messages,
