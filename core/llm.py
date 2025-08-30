@@ -58,7 +58,7 @@ _QWEN3_32B_OPTIONS = {
     "num_gpu": 65, # Layers to offload, all of them.
 }
 
-# Advanced parameters for qwen3:30b-a3b-thinking-2507 (applied on every request).
+# Advanced parameters for qwen3:30b-a3b-thinking-2507-q4_K_M (applied on every request).
 # Not the default, because it's much worse at instruction following.
 # For example, the 30B_A3B version will often justify relevance based on content
 # outside of the section of interest.
@@ -76,20 +76,13 @@ _QWEN3_30B_A3B_OPTIONS = {
 }
 
 def get_ollama_options() -> dict:
-    """
-    Returns the per-request options dict for Ollama.
-    Performs an exact-match check on OLLAMA_MODEL:
-      - unset/empty or 'qwen3:32b' -> 32B options
-      - 'qwen3:30b-a3b-thinking-2507' -> 30B-A3B options
-      - anything else -> ValueError
-    """
     val = os.environ.get("OLLAMA_MODEL")
     if not val or val == "qwen3:32b":
         return dict(_QWEN3_32B_OPTIONS)
-    if val == "qwen3:30b-a3b-thinking-2507":
+    if val == "qwen3:30b-a3b-thinking-2507-q4_K_M":
         return dict(_QWEN3_30B_A3B_OPTIONS)
     raise ValueError(
-        f"Unrecognized OLLAMA_MODEL '{val}'. Allowed: 'qwen3:32b', 'qwen3:30b-a3b-thinking-2507', or unset/empty."
+        f"Unrecognized OLLAMA_MODEL '{val}'. See README for .env options"
     )
 
 # For debug statistics

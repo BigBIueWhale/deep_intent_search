@@ -41,7 +41,7 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 # Model selection (optional)
 # Allowed values:
 #   - qwen3:32b   (default if unset/empty)
-#   - qwen3:30b-a3b-thinking-2507
+#   - qwen3:30b-a3b-thinking-2507-q4_K_M
 OLLAMA_MODEL=qwen3:32b
 ```
 
