@@ -65,15 +65,7 @@ OLLAMA_MODEL_SPLITTER=gemma3:27b
 > ollama pull gemma3:27b
 > ```
 
-The LLM is called with the following advanced options on **every request**:
-- Context Length `num_ctx = 24000`
-- `num_predict = -1`
-- `temperature = 0.6`
-- `top_k = 20`
-- `top_p = 0.95`
-- `min_p = 0`
-- `repeat_penalty = 1`
-- `num_gpu = 65`
+The LLM is called with the metaparameters described in [./core/llm.py](./core/llm.py) on **every request**
 
 ## Per-model options
 
