@@ -4,7 +4,8 @@ import glob
 import time
 import argparse
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+import datetime
 
 from dotenv import load_dotenv
 from core.tokens import count_tokens
@@ -20,6 +21,8 @@ CLIENT = get_client()
 # Get context window size from environment variable, with a default.
 # (This governs how much *surrounding text* we feed around the chunk of interest, not the model's num_ctx.)
 CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 8192))
+
+RECORD_DELIM = "\x1e"
 
 # --- Data Structure ---
 
@@ -62,7 +65,7 @@ def load_chunks_from_disk(directory: str) -> List[Chunk]:
             print(f"Warning: Could not read file {filepath}: {e}")
 
     total_tokens = sum(c.token_count for c in chunks)
-    print(f"Loaded {len(chunks)} chunks ({sum(c.token_count for c in chunks):,} tokens).")
+    print(f"Loaded {len(chunks)} chunks ({total_tokens:,} tokens).")
     return chunks
 
 def get_dynamic_context_window(
@@ -132,16 +135,24 @@ def safe_json_loads(text: str) -> Optional[Dict[str, Any]]:
         return None
     return None
 
+def utc_now_iso() -> str:
+    """Return a UTC timestamp in ISO8601-like format with 'Z' suffix."""
+    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 def check_relevance_with_llm(
     context: str,
     chunk_of_interest: str,
     chunk_filename: str,
     query: str,
     max_retries: int = 5
-) -> bool:
+) -> Dict[str, Any]:
     if not CLIENT:
         print("LLM client not initialized. Assuming relevance as a fallback.")
-        return True
+        return {
+            "summary": "LLM unavailable. Fallback path used. Treated as relevant.",
+            "evidence": "No model call; defaulted to relevant for continuity.",
+            "is_relevant": True,
+        }
 
     prompt = f"""
 You are a highly focused research assistant. Your task is to determine if a specific, isolated section of text is relevant to a user's query.
@@ -193,7 +204,11 @@ Respond with a JSON object in the following format and nothing else:
                 summary = parsed_json.get("summary", "").strip()
                 if summary:
                     print(f"  -> Summary: {summary}")
-                return bool(relevance)
+                return {
+                    "summary": summary,
+                    "evidence": evidence,
+                    "is_relevant": bool(relevance),
+                }
             else:
                 print(f"  -> Warning (Attempt {attempt + 1}/{max_retries}): LLM response was malformed. Response: {response_text}")
                 # Aid debugging for thinking models
@@ -208,31 +223,34 @@ Respond with a JSON object in the following format and nothing else:
             print(f"  -> An error occurred on attempt {attempt + 1}/{max_retries}: {e}")
 
     print(f"  -> All {max_retries} retries failed. Assuming relevance for {chunk_filename}.")
-    return True
+    return {
+        "summary": "All retries failed; assumed relevant.",
+        "evidence": "Fallback path due to repeated errors.",
+        "is_relevant": True,
+    }
 
 def run_search_pass(
     all_chunks: List[Chunk],
     chunks_to_search: List[Chunk],
     query: str
-) -> List[Chunk]:
+) -> List[Tuple[Chunk, Dict[str, Any]]]:
     """
     Runs a single search pass, iterating through `chunks_to_search` and
     checking relevance, using `all_chunks` to build the context window.
+    Returns list of (chunk, judgement_dict).
     """
-    relevant_chunks: List[Chunk] = []
+    results: List[Tuple[Chunk, Dict[str, Any]]] = []
 
     for i, chunk in enumerate(chunks_to_search):
-        # The progress report now shows progress through the current search set.
         print(f"\nAnalyzing chunk {i + 1}/{len(chunks_to_search)} ('{chunk.filename}')...")
 
         # The context window is always built from the complete original set of chunks
         # using the chunk's stored original_index.
         context_window = get_dynamic_context_window(all_chunks, chunk.original_index, CONTEXT_WINDOW_SIZE_TOKENS)
+        judgement = check_relevance_with_llm(context_window, chunk.content, chunk.filename, query)
+        results.append((chunk, judgement))
 
-        if check_relevance_with_llm(context_window, chunk.content, chunk.filename, query):
-            relevant_chunks.append(chunk)
-
-    return relevant_chunks
+    return results
 
 def display_results(relevant_chunks: List[Chunk]):
     """
@@ -250,6 +268,89 @@ def display_results(relevant_chunks: List[Chunk]):
     for chunk in relevant_chunks:
         print(f"- {chunk.filename} (Tokens: {chunk.token_count})")
 
+# --- Run file helpers ---
+
+def ensure_runs_dir(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+
+def list_run_files(path: str) -> List[str]:
+    return sorted(glob.glob(os.path.join(path, "*.jsonl")))
+
+def newest_run_file(path: str) -> Optional[str]:
+    files = list_run_files(path)
+    return files[-1] if files else None
+
+def next_run_filename(path: str) -> str:
+    files = list_run_files(path)
+    if not files:
+        return os.path.join(path, "0001.jsonl")
+    stem = os.path.basename(files[-1]).split(".")[0]
+    try:
+        n = int(stem)
+    except ValueError:
+        n = len(files)
+    return os.path.join(path, f"{n+1:04d}.jsonl")
+
+def read_jsonl_records(filepath: str) -> List[Dict[str, Any]]:
+    data = []
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            blob = f.read()
+    except FileNotFoundError:
+        return data
+
+    for segment in blob.split(RECORD_DELIM):
+        segment = segment.strip()
+        if not segment:
+            continue
+        try:
+            obj = json.loads(segment)
+            data.append(obj)
+        except json.JSONDecodeError:
+            print(f"Warning: Skipping a malformed JSON record in {os.path.basename(filepath)}")
+            continue
+    return data
+
+def write_json_record_append(filepath: str, obj: Dict[str, Any]) -> None:
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write(json.dumps(obj, ensure_ascii=False))
+        f.write(RECORD_DELIM)
+        f.write("\n")
+
+def assert_compatible_with_current_chunks(meta: Dict[str, Any], current_total_chunks: int) -> None:
+    meta_orig = meta.get("original_total_chunks")
+    if meta_orig is None:
+        raise RuntimeError(
+            "The newest run file is missing 'original_total_chunks' in metadata.\n"
+            "This file cannot be resumed or refined safely. Please delete the './search_runs' folder and re-run."
+        )
+    if int(meta_orig) != int(current_total_chunks):
+        raise RuntimeError(
+            "The newest run file refers to a different number of original chunks than what is currently loaded.\n"
+            f"- File says original_total_chunks = {meta_orig}\n"
+            f"- Currently loaded chunks       = {current_total_chunks}\n\n"
+            "This usually means your 'split' directory changed since the run was created.\n"
+            "To proceed safely, delete the './search_runs' folder and run again so a new series can be created."
+        )
+
+def summarize_run_status(run_records: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    if not run_records:
+        raise RuntimeError("Run file is empty; cannot determine metadata.")
+    meta = run_records[0]
+    if meta.get("type") != "meta":
+        raise RuntimeError("First record in run file is not metadata; file is invalid.")
+    judgements = [r for r in run_records[1:] if r.get("type") == "judgement"]
+    return meta, judgements
+
+def build_selected_chunks(all_chunks: List[Chunk], selected_indices: List[int]) -> List[Chunk]:
+    index_map = {c.original_index: c for c in all_chunks}
+    result = []
+    for oi in selected_indices:
+        if oi not in index_map:
+            raise RuntimeError(f"Selected index {oi} not found in current chunks.")
+        result.append(index_map[oi])
+    return result
+
 # --- Main Execution ---
 
 def main():
@@ -263,13 +364,19 @@ def main():
         "--query",
         type=str,
         required=True,
-        help="The initial search query."
+        help="The search query for this run."
     )
     parser.add_argument(
         "--dir",
         type=str,
         default="split",
         help="The directory containing the text chunks (default: 'split')."
+    )
+    parser.add_argument(
+        "--outdir",
+        type=str,
+        default='search_runs',
+        help="Directory for JSONL run files (default: './search_runs')."
     )
     args = parser.parse_args()
 
@@ -279,41 +386,158 @@ def main():
         print("No chunk files found or loaded. Exiting.")
         return
 
-    # This list will be updated after each successful pass.
-    active_results = all_chunks
-    query = args.query
-    pass_number = 1
+    ensure_runs_dir(args.outdir)
 
-    # Main refinement loop
-    while True:
-        print(f"\n--- Starting Deep Search: Pass {pass_number} ({len(active_results)} sections to search, Context window: {CONTEXT_WINDOW_SIZE_TOKENS} tokens) ---")
+    try:
+        newest = newest_run_file(args.outdir)
 
-        # Always use `all_chunks` for context and `active_results` for the items to search.
-        pass_results = run_search_pass(all_chunks, active_results, query)
+        if newest is None:
+            print("\nNo existing runs found. Starting a new run over all chunks.")
+            selected_indices = [c.original_index for c in all_chunks]
+            run_total = len(selected_indices)
 
-        if not pass_results:
-            print("\n" + "="*80)
-            print("⚠️ Your query returned 0 results.")
-            print("   The search set remains unchanged from the previous pass.")
-            # Do not update active_results, allowing the next search to use the old set.
-        else:
-            # Update the active set to the new, narrower results.
-            active_results = pass_results
-            display_results(active_results)
+            run_path = next_run_filename(args.outdir)
+            print(f"Creating new run file: {os.path.basename(run_path)}")
 
-        # Prompt for the next query
+            meta = {
+                "type": "meta",
+                "created_at": utc_now_iso(),
+                "query": args.query,
+                "original_total_chunks": len(all_chunks),
+                "run_total_chunks": run_total,
+                "selected_indices": selected_indices,
+                "pass_number": 1,
+                "delimiter": "\\u001e",
+            }
+            write_json_record_append(run_path, meta)
+
+            chunks_to_search = build_selected_chunks(all_chunks, selected_indices)
+            results = run_search_pass(all_chunks, chunks_to_search, args.query)
+
+            relevant_chunks: List[Chunk] = []
+            for pos, (chunk, judgement) in enumerate(results):
+                record = {
+                    "type": "judgement",
+                    "position_in_run": pos,
+                    "original_index": chunk.original_index,
+                    "filename": chunk.filename,
+                    "is_relevant": judgement["is_relevant"],
+                    "summary": judgement["summary"],
+                    "evidence": judgement["evidence"],
+                }
+                write_json_record_append(run_path, record)
+                if judgement["is_relevant"]:
+                    relevant_chunks.append(chunk)
+
+            display_results(relevant_chunks)
+            print("\n--- Deep Search Complete (initial pass) ---")
+            return
+
+        print(f"\nFound existing runs. Newest: {os.path.basename(newest)}")
+        records = read_jsonl_records(newest)
+        meta, judgements = summarize_run_status(records)
+        assert_compatible_with_current_chunks(meta, len(all_chunks))
+
+        selected_indices = meta.get("selected_indices", [])
+        if not isinstance(selected_indices, list) or not all(isinstance(x, int) for x in selected_indices):
+            raise RuntimeError("Metadata 'selected_indices' is missing or invalid; cannot resume/refine safely.")
+
+        run_total = int(meta.get("run_total_chunks", len(selected_indices)))
+        pass_number = int(meta.get("pass_number", 1))
+
+        if len(judgements) >= run_total:
+            print("Newest run is complete. Starting a refinement round focusing on positive judgements.")
+
+            positive_original_indices = [j["original_index"] for j in judgements if j.get("is_relevant") is True]
+            if not positive_original_indices:
+                print("No positively judged chunks to refine. Nothing more to do.")
+                print("\n--- Deep Search Complete (no further refinement) ---")
+                return
+
+            run_path = next_run_filename(args.outdir)
+            print(f"Creating new refinement run file: {os.path.basename(run_path)}")
+
+            new_meta = {
+                "type": "meta",
+                "created_at": utc_now_iso(),
+                "query": args.query,
+                "original_total_chunks": len(all_chunks),
+                "run_total_chunks": len(positive_original_indices),
+                "selected_indices": positive_original_indices,
+                "pass_number": pass_number + 1,
+                "delimiter": "\\u001e",
+            }
+            write_json_record_append(run_path, new_meta)
+
+            chunks_to_search = build_selected_chunks(all_chunks, positive_original_indices)
+            results = run_search_pass(all_chunks, chunks_to_search, args.query)
+
+            relevant_chunks: List[Chunk] = []
+            for pos, (chunk, judgement) in enumerate(results):
+                record = {
+                    "type": "judgement",
+                    "position_in_run": pos,
+                    "original_index": chunk.original_index,
+                    "filename": chunk.filename,
+                    "is_relevant": judgement["is_relevant"],
+                    "summary": judgement["summary"],
+                    "evidence": judgement["evidence"],
+                }
+                write_json_record_append(run_path, record)
+                if judgement["is_relevant"]:
+                    relevant_chunks.append(chunk)
+
+            display_results(relevant_chunks)
+            print("\n--- Deep Search Complete (refinement pass) ---")
+            return
+
+        print("Newest run is partially complete. Resuming...")
+        already_done_positions = {int(j.get("position_in_run", -1)) for j in judgements}
+        total_positions = list(range(run_total))
+        remaining_positions = [p for p in total_positions if p not in already_done_positions]
+
+        if not remaining_positions:
+            print("Nothing to resume; however file appears incomplete. Exiting to avoid inconsistency.")
+            return
+
+        remaining_original_indices = [selected_indices[p] for p in remaining_positions]
+        chunks_to_search = build_selected_chunks(all_chunks, remaining_original_indices)
+        position_to_chunk = {p: c for p, c in zip(remaining_positions, chunks_to_search)}
+
+        relevant_chunks_appended: List[Chunk] = []
+        for pos in remaining_positions:
+            chunk = position_to_chunk[pos]
+            print(f"\nResuming with chunk position {pos + 1}/{run_total} ('{chunk.filename}')...")
+            context_window = get_dynamic_context_window(all_chunks, chunk.original_index, CONTEXT_WINDOW_SIZE_TOKENS)
+            judgement = check_relevance_with_llm(context_window, chunk.content, chunk.filename, args.query)
+
+            record = {
+                "type": "judgement",
+                "position_in_run": pos,
+                "original_index": chunk.original_index,
+                "filename": chunk.filename,
+                "is_relevant": judgement["is_relevant"],
+                "summary": judgement["summary"],
+                "evidence": judgement["evidence"],
+            }
+            write_json_record_append(newest, record)
+            if judgement["is_relevant"]:
+                relevant_chunks_appended.append(chunk)
+
+        display_results(relevant_chunks_appended)
+        print("\n--- Deep Search Complete (resumed run) ---")
+
+    except KeyboardInterrupt:
+        print("\n\nKeyboardInterrupt received. Gracefully stopping current run.")
+        print("All completed judgements up to this point have been saved.")
+    except RuntimeError as e:
         print("\n" + "="*80)
-        print("You can now enter a new query to search within these results.")
-        print("Press Enter to exit.")
-        print("="*80)
-
-        pass_number += 1
-        query = input(f"Refinement Query (Pass {pass_number}) > ").strip()
-
-        if not query:
-            break
-
-    print("\n--- Deep Search Complete ---")
+        print("FATAL: Cannot resume or refine the newest run.\n")
+        print(str(e))
+        print("="*80 + "\n")
+    except Exception as e:
+        print("\nAn unexpected error occurred:")
+        print(repr(e))
 
 
 if __name__ == "__main__":

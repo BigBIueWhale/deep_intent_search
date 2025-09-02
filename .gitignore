@@ -1,6 +1,6 @@
 /.env
 /venv
 /split
-/search
+/search_runs
 /examples
 /combine.py
