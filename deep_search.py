@@ -1,7 +1,6 @@
 import os
 import json
 import glob
-import time
 import argparse
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
@@ -25,6 +24,16 @@ CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 81
 RECORD_DELIM = "\x1e"
 
 # --- Data Structure ---
+
+@dataclass
+class RunPlan:
+    mode: str  # 'fresh' | 'refine' | 'resume'
+    run_path: str
+    selected_indices: List[int]          # original indices in the run's selection
+    positions_to_process: List[int]      # run-relative positions that still need processing
+    run_total: int                       # total positions in this run
+    pass_number: int
+    meta: Optional[Dict[str, Any]] = None  # meta to write at start (None for resume)
 
 @dataclass
 class Chunk:
@@ -231,26 +240,63 @@ Respond with a JSON object in the following format and nothing else:
 
 def run_search_pass(
     all_chunks: List[Chunk],
-    chunks_to_search: List[Chunk],
-    query: str
-) -> List[Tuple[Chunk, Dict[str, Any]]]:
+    query: str,
+    plan: RunPlan
+) -> List[Chunk]:
     """
-    Runs a single search pass, iterating through `chunks_to_search` and
-    checking relevance, using `all_chunks` to build the context window.
-    Returns list of (chunk, judgement_dict).
+    Unified pass that handles 'fresh', 'refine', and 'resume' modes.
+    - Writes metadata if provided (fresh/refine).
+    - Streams judgements record-by-record (durable progress).
+    - Only processes plan.positions_to_process (resume safety).
+    Returns the list of *relevant* chunks processed in this pass.
     """
-    results: List[Tuple[Chunk, Dict[str, Any]]] = []
+    # If we are starting a new run file (fresh/refine), write meta first.
+    if plan.meta is not None:
+        write_json_record_append(plan.run_path, plan.meta)
 
-    for i, chunk in enumerate(chunks_to_search):
-        print(f"\nAnalyzing chunk {i + 1}/{len(chunks_to_search)} ('{chunk.filename}')...")
+    # Build the run's selection once, then map positions => chunks
+    chunks_in_run = build_selected_chunks(all_chunks, plan.selected_indices)
+    position_to_chunk = {pos: chunks_in_run[pos] for pos in range(len(chunks_in_run))}
 
-        # The context window is always built from the complete original set of chunks
-        # using the chunk's stored original_index.
-        context_window = get_dynamic_context_window(all_chunks, chunk.original_index, CONTEXT_WINDOW_SIZE_TOKENS)
-        judgement = check_relevance_with_llm(context_window, chunk.content, chunk.filename, query)
-        results.append((chunk, judgement))
+    relevant_chunks: List[Chunk] = []
 
-    return results
+    for pos in plan.positions_to_process:
+        chunk = position_to_chunk[pos]
+        print(f"\nAnalyzing chunk position {pos + 1}/{plan.run_total} ('{chunk.filename}')...")
+
+        context_window = get_dynamic_context_window(
+            all_chunks, chunk.original_index, CONTEXT_WINDOW_SIZE_TOKENS
+        )
+        judgement = check_relevance_with_llm(
+            context_window, chunk.content, chunk.filename, query
+        )
+
+        record = {
+            "type": "judgement",
+            "position_in_run": pos,
+            "original_index": chunk.original_index,
+            "filename": chunk.filename,
+            "is_relevant": judgement["is_relevant"],
+            "summary": judgement["summary"],
+            "evidence": judgement["evidence"],
+        }
+        write_json_record_append(plan.run_path, record)
+
+        if judgement["is_relevant"]:
+            relevant_chunks.append(chunk)
+
+    # Nice summary mirrors your existing UX
+    display_results(relevant_chunks)
+
+    end_label = {
+        "fresh": "initial pass",
+        "refine": "refinement pass",
+        "resume": "resumed run",
+    }.get(plan.mode, "pass")
+
+    print(f"\n--- Deep Search Complete ({end_label}) ---")
+
+    return relevant_chunks
 
 def display_results(relevant_chunks: List[Chunk]):
     """
@@ -360,24 +406,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Perform a deep, contextual search through text chunks using an LLM."
     )
-    parser.add_argument(
-        "--query",
-        type=str,
-        required=True,
-        help="The search query for this run."
-    )
-    parser.add_argument(
-        "--dir",
-        type=str,
-        default="split",
-        help="The directory containing the text chunks (default: 'split')."
-    )
-    parser.add_argument(
-        "--outdir",
-        type=str,
-        default='search_runs',
-        help="Directory for JSONL run files (default: './search_runs')."
-    )
+    parser.add_argument("--query", type=str, required=True, help="The search query for this run.")
+    parser.add_argument("--dir", type=str, default="split", help="The directory containing the text chunks (default: 'split').")
+    parser.add_argument("--outdir", type=str, default='search_runs', help="Directory for JSONL run files (default: './search_runs').")
     args = parser.parse_args()
 
     # Load all chunks once at the start. This list will be used for context.
@@ -391,11 +422,11 @@ def main():
     try:
         newest = newest_run_file(args.outdir)
 
+        # ========== Case 1: Fresh start ==========
         if newest is None:
             print("\nNo existing runs found. Starting a new run over all chunks.")
             selected_indices = [c.original_index for c in all_chunks]
             run_total = len(selected_indices)
-
             run_path = next_run_filename(args.outdir)
             print(f"Creating new run file: {os.path.basename(run_path)}")
 
@@ -409,30 +440,21 @@ def main():
                 "pass_number": 1,
                 "delimiter": "\\u001e",
             }
-            write_json_record_append(run_path, meta)
 
-            chunks_to_search = build_selected_chunks(all_chunks, selected_indices)
-            results = run_search_pass(all_chunks, chunks_to_search, args.query)
+            plan = RunPlan(
+                mode="fresh",
+                run_path=run_path,
+                selected_indices=selected_indices,
+                positions_to_process=list(range(run_total)),
+                run_total=run_total,
+                pass_number=1,
+                meta=meta,
+            )
 
-            relevant_chunks: List[Chunk] = []
-            for pos, (chunk, judgement) in enumerate(results):
-                record = {
-                    "type": "judgement",
-                    "position_in_run": pos,
-                    "original_index": chunk.original_index,
-                    "filename": chunk.filename,
-                    "is_relevant": judgement["is_relevant"],
-                    "summary": judgement["summary"],
-                    "evidence": judgement["evidence"],
-                }
-                write_json_record_append(run_path, record)
-                if judgement["is_relevant"]:
-                    relevant_chunks.append(chunk)
-
-            display_results(relevant_chunks)
-            print("\n--- Deep Search Complete (initial pass) ---")
+            run_search_pass(all_chunks, args.query, plan)
             return
 
+        # ========== Cases 2 & 3: Existing series ==========
         print(f"\nFound existing runs. Newest: {os.path.basename(newest)}")
         records = read_jsonl_records(newest)
         meta, judgements = summarize_run_status(records)
@@ -445,6 +467,7 @@ def main():
         run_total = int(meta.get("run_total_chunks", len(selected_indices)))
         pass_number = int(meta.get("pass_number", 1))
 
+        # Completed -> Refinement pass
         if len(judgements) >= run_total:
             print("Newest run is complete. Starting a refinement round focusing on positive judgements.")
 
@@ -467,30 +490,21 @@ def main():
                 "pass_number": pass_number + 1,
                 "delimiter": "\\u001e",
             }
-            write_json_record_append(run_path, new_meta)
 
-            chunks_to_search = build_selected_chunks(all_chunks, positive_original_indices)
-            results = run_search_pass(all_chunks, chunks_to_search, args.query)
+            plan = RunPlan(
+                mode="refine",
+                run_path=run_path,
+                selected_indices=positive_original_indices,
+                positions_to_process=list(range(len(positive_original_indices))),
+                run_total=len(positive_original_indices),
+                pass_number=pass_number + 1,
+                meta=new_meta,
+            )
 
-            relevant_chunks: List[Chunk] = []
-            for pos, (chunk, judgement) in enumerate(results):
-                record = {
-                    "type": "judgement",
-                    "position_in_run": pos,
-                    "original_index": chunk.original_index,
-                    "filename": chunk.filename,
-                    "is_relevant": judgement["is_relevant"],
-                    "summary": judgement["summary"],
-                    "evidence": judgement["evidence"],
-                }
-                write_json_record_append(run_path, record)
-                if judgement["is_relevant"]:
-                    relevant_chunks.append(chunk)
-
-            display_results(relevant_chunks)
-            print("\n--- Deep Search Complete (refinement pass) ---")
+            run_search_pass(all_chunks, args.query, plan)
             return
 
+        # Partially complete -> Resume
         print("Newest run is partially complete. Resuming...")
         already_done_positions = {int(j.get("position_in_run", -1)) for j in judgements}
         total_positions = list(range(run_total))
@@ -500,32 +514,18 @@ def main():
             print("Nothing to resume; however file appears incomplete. Exiting to avoid inconsistency.")
             return
 
-        remaining_original_indices = [selected_indices[p] for p in remaining_positions]
-        chunks_to_search = build_selected_chunks(all_chunks, remaining_original_indices)
-        position_to_chunk = {p: c for p, c in zip(remaining_positions, chunks_to_search)}
+        plan = RunPlan(
+            mode="resume",
+            run_path=newest,                 # append to the SAME file
+            selected_indices=selected_indices,
+            positions_to_process=remaining_positions,
+            run_total=run_total,
+            pass_number=pass_number,
+            meta=None,                       # don't rewrite meta on resume
+        )
 
-        relevant_chunks_appended: List[Chunk] = []
-        for pos in remaining_positions:
-            chunk = position_to_chunk[pos]
-            print(f"\nResuming with chunk position {pos + 1}/{run_total} ('{chunk.filename}')...")
-            context_window = get_dynamic_context_window(all_chunks, chunk.original_index, CONTEXT_WINDOW_SIZE_TOKENS)
-            judgement = check_relevance_with_llm(context_window, chunk.content, chunk.filename, args.query)
-
-            record = {
-                "type": "judgement",
-                "position_in_run": pos,
-                "original_index": chunk.original_index,
-                "filename": chunk.filename,
-                "is_relevant": judgement["is_relevant"],
-                "summary": judgement["summary"],
-                "evidence": judgement["evidence"],
-            }
-            write_json_record_append(newest, record)
-            if judgement["is_relevant"]:
-                relevant_chunks_appended.append(chunk)
-
-        display_results(relevant_chunks_appended)
-        print("\n--- Deep Search Complete (resumed run) ---")
+        run_search_pass(all_chunks, args.query, plan)
+        return
 
     except KeyboardInterrupt:
         print("\n\nKeyboardInterrupt received. Gracefully stopping current run.")
