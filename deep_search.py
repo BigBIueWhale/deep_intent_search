@@ -207,8 +207,6 @@ Respond with a JSON object in the following format and nothing else:
         except Exception as e:
             print(f"  -> An error occurred on attempt {attempt + 1}/{max_retries}: {e}")
 
-        time.sleep(2)
-
     print(f"  -> All {max_retries} retries failed. Assuming relevance for {chunk_filename}.")
     return True
 
