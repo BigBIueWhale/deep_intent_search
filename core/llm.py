@@ -132,9 +132,10 @@ _QWEN3_30B_A3B_OPTIONS = {
 }
 
 _GEMMA3_27B_OPTIONS = {
-    # I don't know why, and I'm not sure about this, but the performance
-    # of Gemma3 seems to break down when increasing the context length too much.
-    "num_ctx": 12000,
+    # Gemma3 is unique in the fact it was pretrained on
+    # 32k token context length, unlike qwen3 which was mostly
+    # trained on 4096 context length.
+    "num_ctx": 32768,
     # Any more than this is undefined behaviour according to Google
     # The model was never trained on outputting more than 8192 tokens.
     "num_predict": 8192,
