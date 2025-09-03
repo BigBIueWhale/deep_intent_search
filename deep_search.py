@@ -69,7 +69,7 @@ def load_chunks_from_disk(directory: str) -> List[Chunk]:
             token_count = count_tokens(content)
             filename = os.path.basename(filepath)
             # Store the original index 'i' in the Chunk object.
-            chunks.append(Chunk(original_index=i, filename=filename, content=content, token_count=token_count))
+            chunks.append(Chunk(original_index=i + 1, filename=filename, content=content, token_count=token_count))
         except IOError as e:
             print(f"Warning: Could not read file {filepath}: {e}")
 
@@ -256,16 +256,16 @@ def run_search_pass(
 
     # Build the run's selection once, then map positions => chunks
     chunks_in_run = build_selected_chunks(all_chunks, plan.selected_indices)
-    position_to_chunk = {pos: chunks_in_run[pos] for pos in range(len(chunks_in_run))}
+    position_to_chunk = {pos + 1: chunks_in_run[pos] for pos in range(len(chunks_in_run))}
 
     relevant_chunks: List[Chunk] = []
 
     for pos in plan.positions_to_process:
         chunk = position_to_chunk[pos]
-        print(f"\nAnalyzing chunk position {pos + 1}/{plan.run_total} ('{chunk.filename}')...")
+        print(f"\nAnalyzing chunk position {pos}/{plan.run_total} ('{chunk.filename}')...")
 
         context_window = get_dynamic_context_window(
-            all_chunks, chunk.original_index, CONTEXT_WINDOW_SIZE_TOKENS
+            all_chunks, chunk.original_index - 1, CONTEXT_WINDOW_SIZE_TOKENS
         )
         judgement = check_relevance_with_llm(
             context_window, chunk.content, chunk.filename, query
@@ -445,7 +445,7 @@ def main():
                 mode="fresh",
                 run_path=run_path,
                 selected_indices=selected_indices,
-                positions_to_process=list(range(run_total)),
+                positions_to_process=list(range(1, run_total + 1)),
                 run_total=run_total,
                 pass_number=1,
                 meta=meta,
@@ -495,7 +495,7 @@ def main():
                 mode="refine",
                 run_path=run_path,
                 selected_indices=positive_original_indices,
-                positions_to_process=list(range(len(positive_original_indices))),
+                positions_to_process=list(range(1, len(positive_original_indices) + 1)),
                 run_total=len(positive_original_indices),
                 pass_number=pass_number + 1,
                 meta=new_meta,
@@ -507,7 +507,7 @@ def main():
         # Partially complete -> Resume
         print("Newest run is partially complete. Resuming...")
         already_done_positions = {int(j.get("position_in_run", -1)) for j in judgements}
-        total_positions = list(range(run_total))
+        total_positions = list(range(1, run_total + 1))
         remaining_positions = [p for p in total_positions if p not in already_done_positions]
 
         if not remaining_positions:
