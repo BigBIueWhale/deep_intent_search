@@ -242,7 +242,7 @@ def run_search_pass(
     all_chunks: List[Chunk],
     query: str,
     plan: RunPlan
-) -> List[Chunk]:
+) -> None:
     """
     Unified pass that handles 'fresh', 'refine', and 'resume' modes.
     - Writes metadata if provided (fresh/refine).
@@ -257,8 +257,6 @@ def run_search_pass(
     # Build the run's selection once, then map positions => chunks
     chunks_in_run = build_selected_chunks(all_chunks, plan.selected_indices)
     position_to_chunk = {pos + 1: chunks_in_run[pos] for pos in range(len(chunks_in_run))}
-
-    relevant_chunks: List[Chunk] = []
 
     for pos in plan.positions_to_process:
         chunk = position_to_chunk[pos]
@@ -282,12 +280,6 @@ def run_search_pass(
         }
         write_json_record_append(plan.run_path, record)
 
-        if judgement["is_relevant"]:
-            relevant_chunks.append(chunk)
-
-    # Nice summary mirrors your existing UX
-    display_results(relevant_chunks)
-
     end_label = {
         "fresh": "initial pass",
         "refine": "refinement pass",
@@ -295,24 +287,6 @@ def run_search_pass(
     }.get(plan.mode, "pass")
 
     print(f"\n--- Deep Search Complete ({end_label}) ---")
-
-    return relevant_chunks
-
-def display_results(relevant_chunks: List[Chunk]):
-    """
-    Prints the filenames of the relevant chunks to the console.
-    """
-    print("\n" + "="*80)
-    print(f"Found {len(relevant_chunks)} relevant section(s):")
-    print("="*80 + "\n")
-
-    if not relevant_chunks:
-        print("No relevant sections were found for your query.")
-        return
-
-    # Only print the filename and token count, not the content.
-    for chunk in relevant_chunks:
-        print(f"- {chunk.filename} (Tokens: {chunk.token_count})")
 
 # --- Run file helpers ---
 
