@@ -151,9 +151,6 @@ _QWEN3_30B_A3B_INSTRUCT_OPTIONS = {
     "top_p": 0.8,
     "min_p": 0.0,
     "repeat_penalty": 1.0,
-    # Stops align with tokenizer EOS and guard against starting the next turn.
-    # Safe to include as options; callers can override/extend.
-    "stop": ["<|im_end|>", "<|endoftext|>", "<|im_start|>"],
     # Layers to offload; keep identical to thinking variant.
     "num_gpu": 49,
 }
