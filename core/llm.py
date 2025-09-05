@@ -118,7 +118,7 @@ _QWEN3_32B_OPTIONS = {
 # Not the default, because it's much worse at instruction following.
 # For example, the 30B_A3B version will often justify relevance based on content
 # outside of the section of interest.
-_QWEN3_30B_A3B_OPTIONS = {
+_QWEN3_30B_A3B_THINKING_OPTIONS = {
     # Good context length value for 32GB VRAM and flash attention enabled
     # Ends up using ~31 GB in "ollama ps" when context length is full.
     "num_ctx": 57344, # 56k
@@ -129,6 +129,33 @@ _QWEN3_30B_A3B_OPTIONS = {
     "min_p": 0.0,
     "repeat_penalty": 1.0,
     "num_gpu": 49, # Layers to offload, all of them.
+}
+
+# Advanced parameters for qwen3:30b-a3b-instruct-2507-q4_K_M (applied on every request).
+# Matches official Qwen/Unsloth guidance for Instruct 2507, but keeps the same context length
+# and layer offload as the thinking variant by design.
+_QWEN3_30B_A3B_INSTRUCT_OPTIONS = {
+    # Good context length value for 32GB VRAM and flash attention enabled
+    # Keep identical to the thinking variant per requirements.
+    "num_ctx": 57344, # 56k
+    # Instruct variants don't "think" as long; you can still override at call-site if needed.
+    # Using the "magic number" 16,384 instead of the 11,264 previously written here —
+    # because the official page for Qwen3-30B-A3B-Instruct-2507 says:
+    #   "Adequate Output Length: We recommend using an output length of 16,384 tokens for most queries,
+    #    which is adequate for instruct models."
+    # Source: https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507
+    "num_predict": 16384,
+    # Official guidance for Instruct-2507:
+    "temperature": 0.7,
+    "top_k": 20,
+    "top_p": 0.8,
+    "min_p": 0.0,
+    "repeat_penalty": 1.0,
+    # Stops align with tokenizer EOS and guard against starting the next turn.
+    # Safe to include as options; callers can override/extend.
+    "stop": ["<|im_end|>", "<|endoftext|>", "<|im_start|>"],
+    # Layers to offload; keep identical to thinking variant.
+    "num_gpu": 49,
 }
 
 _GEMMA3_27B_OPTIONS = {
@@ -145,7 +172,9 @@ def get_ollama_options(model: str) -> dict:
     if model == "qwen3:32b":
         return dict(_QWEN3_32B_OPTIONS)
     if model == "qwen3:30b-a3b-thinking-2507-q4_K_M":
-        return dict(_QWEN3_30B_A3B_OPTIONS)
+        return dict(_QWEN3_30B_A3B_THINKING_OPTIONS)
+    if model == "qwen3:30b-a3b-instruct-2507-q4_K_M":
+        return dict(_QWEN3_30B_A3B_INSTRUCT_OPTIONS)
     if model == "gemma3:27b":
         return dict(_GEMMA3_27B_OPTIONS)
     raise ValueError(

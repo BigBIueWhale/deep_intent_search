@@ -49,6 +49,7 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 # Allowed values:
 #   - qwen3:32b
 #   - qwen3:30b-a3b-thinking-2507-q4_K_M
+#   - qwen3:30b-a3b-instruct-2507-q4_K_M
 #   - gemma3:27b
 #
 # Usage:
@@ -62,6 +63,7 @@ OLLAMA_MODEL_SPLITTER=gemma3:27b
 > ```bash
 > ollama pull qwen3:32b
 > ollama pull qwen3:30b-a3b-thinking-2507-q4_K_M
+> ollama pull qwen3:30b-a3b-instruct-2507-q4_K_M
 > ollama pull gemma3:27b
 > ```
 
