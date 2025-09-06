@@ -344,10 +344,11 @@ def first_oversized_segment(text: str, boundaries: list[int]) -> tuple[int, int]
 
 # -------------------- One-split proposer (segment-scoped) --------------------
 
-def propose_split_index_for_segment(full_text: str, seg_lo: int, seg_hi: int, filename: str) -> int:
+def propose_split_index_for_segment(full_text: str, seg_lo: int, seg_hi: int, filename: str) -> tuple[int, bool]:
     """
     Run the same LLM cascade as your recursive splitter, but restricted to [seg_lo:seg_hi].
-    Returns the absolute split index in the full_text (NOT relative), or -1 on failure.
+    Returns (absolute split index in the full_text, used_fallback_flag). If no valid split
+    can be obtained from the LLM, falls back to algorithmic methods and marks used_fallback=True.
     """
     segment = full_text[seg_lo:seg_hi]
     # If the segment is larger than the window, use a central window for the LLM.
@@ -374,6 +375,7 @@ Full text:
 ```"""
 
     split_index = -1
+    used_fallback = False  # Track if algorithmic fallback was used
     max_chat_attempts = 6
     attempts_per_chat = 3
     max_retries = attempts_per_chat * max_chat_attempts
@@ -475,10 +477,11 @@ Return the JSON now."""
             print("Delimiter splitting failed. Reverting to naive middle split.")
             rel = len(segment) // 2
         split_index = seg_lo + rel
+        used_fallback = True
 
-    return split_index
+    return (split_index, used_fallback)
 
-# -------------------- NEW: Driver that uses per-file cut indexes --------------------
+# -------------------- Driver that uses per-file cut indexes --------------------
 
 def process_file_with_cuts(file_index: int, input_filename: str, progress_dir: str) -> bool:
     """
@@ -489,7 +492,7 @@ def process_file_with_cuts(file_index: int, input_filename: str, progress_dir: s
 
     Returns True if the file is complete (all segments <= MAX), else False.
     """
-    progress_path = os.path.join(progress_dir, f"{str(file_index).zfill(4)}.cuts.jsonl")
+    progress_path = os.path.join(progress_dir, f"{str(file_index).zfill(6)}.cuts.jsonl")
 
     try:
         with open(input_filename, "r", encoding="utf-8", errors='ignore') as fr:
@@ -512,11 +515,12 @@ def process_file_with_cuts(file_index: int, input_filename: str, progress_dir: s
 
         lo, hi = seg
         # Propose a split inside [lo:hi)
-        split_abs = propose_split_index_for_segment(file_contents, lo, hi, input_filename)
+        split_abs, used_fallback = propose_split_index_for_segment(file_contents, lo, hi, input_filename)
         # Guard against duplicates and near-edges
         if split_abs <= lo or split_abs >= hi:
             print(f"Warning: Proposed split {split_abs} outside segment ({lo},{hi}). Forcing midpoint.")
             split_abs = lo + (hi - lo) // 2
+            used_fallback = True
         if split_abs in cuts:
             # Very rare, but keep loop progressing
             print("Info: Proposed split already exists; nudging by +1.")
@@ -524,16 +528,22 @@ def process_file_with_cuts(file_index: int, input_filename: str, progress_dir: s
             if split_abs in cuts or split_abs <= lo or split_abs >= hi:
                 # fallback hard midpoint if still invalid
                 split_abs = lo + (hi - lo) // 2
+                used_fallback = True
 
         # Append the new cut (durable)
-        write_json_record_append(progress_path, {"type": "cut", "pos": int(split_abs)})
+        write_json_record_append(progress_path, {
+            "type": "cut",
+            "pos": int(split_abs),
+            # Mark if this position came from an algorithmic fallback
+            "algorithmic_fallback": bool(used_fallback),
+        })
         cuts.append(int(split_abs))
         # loop continues to re-evaluate from the leftmost oversized segment
 
 
 def all_files_complete(file_paths: list[str], progress_dir: str) -> bool:
     for idx, path in enumerate(file_paths, start=1):
-        p = os.path.join(progress_dir, f"{str(idx).zfill(4)}.cuts.jsonl")
+        p = os.path.join(progress_dir, f"{str(idx).zfill(6)}.cuts.jsonl")
         try:
             with open(path, "r", encoding="utf-8", errors='ignore') as fr:
                 text = fr.read()
@@ -559,7 +569,7 @@ def finalize_chunks(file_paths: list[str], output_dir: str, progress_dir: str) -
 
     global_index = 0
     for idx, path in enumerate(file_paths, start=1):
-        p = os.path.join(progress_dir, f"{str(idx).zfill(4)}.cuts.jsonl")
+        p = os.path.join(progress_dir, f"{str(idx).zfill(6)}.cuts.jsonl")
         with open(path, "r", encoding="utf-8", errors='ignore') as fr:
             text = fr.read()
         _, cuts = read_progress_file(p)
