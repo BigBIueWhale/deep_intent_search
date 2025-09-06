@@ -353,6 +353,7 @@ Full text:
 - Your last split was grossly imbalanced. Choose `begin_second_section` whose FIRST CHARACTER INDEX lies strictly within [45%, 55%] of the provided text length. Anything outside this band is invalid.
 - Prefer a natural boundary at the nearest delimiter (newline, sentence end, or whitespace), but DO NOT move outside [45%, 55%].
 - The JSON value must be an exact, verbatim substring from the provided text, consisting of 3-5 words that uniquely identify the location. If your phrase is not unique, change it until it is unique (still 3-5 words).
+- Preserve precise origin language and specific unicode letters used.
 - If uncertain, take the 3-5 word phrase starting EXACTLY at the midpoint character of the provided text and expand rightward until uniqueness is achieved (max 5 words).
 Return the JSON now."""
                             plea = plea2 if be_draconian else plea1
