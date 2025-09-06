@@ -50,6 +50,7 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 #   - qwen3:32b
 #   - qwen3:30b-a3b-thinking-2507-q4_K_M
 #   - qwen3:30b-a3b-instruct-2507-q4_K_M
+#   - JollyLlama/GLM-4-32B-0414-Q4_K_M
 #   - gemma3:27b
 #
 # Usage:
@@ -64,6 +65,7 @@ OLLAMA_MODEL_SPLITTER=gemma3:27b
 > ollama pull qwen3:32b
 > ollama pull qwen3:30b-a3b-thinking-2507-q4_K_M
 > ollama pull qwen3:30b-a3b-instruct-2507-q4_K_M
+> ollama pull JollyLlama/GLM-4-32B-0414-Q4_K_M
 > ollama pull gemma3:27b
 > ```
 

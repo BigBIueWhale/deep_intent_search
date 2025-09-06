@@ -155,6 +155,15 @@ _QWEN3_30B_A3B_INSTRUCT_OPTIONS = {
     "num_gpu": 49,
 }
 
+_GLM_4_32B_OPTIONS = {
+    # GLM4 has crazy efficient context window.
+    # It has 48 q heads and only 2 kv heads, a 24:1 ratio which is pretty high.
+    # We turn on full context capability of the model
+    "num_ctx": 32768,
+    # Just a number to avoid infinite generation
+    "num_predict": 8192,
+}
+
 _GEMMA3_27B_OPTIONS = {
     # Gemma3 is unique in the fact it was pretrained on
     # 32k token context length, unlike qwen3 which was mostly
@@ -172,6 +181,8 @@ def get_ollama_options(model: str) -> dict:
         return dict(_QWEN3_30B_A3B_THINKING_OPTIONS)
     if model == "qwen3:30b-a3b-instruct-2507-q4_K_M":
         return dict(_QWEN3_30B_A3B_INSTRUCT_OPTIONS)
+    if model == "JollyLlama/GLM-4-32B-0414-Q4_K_M":
+        return dict(_GLM_4_32B_OPTIONS)
     if model == "gemma3:27b":
         return dict(_GEMMA3_27B_OPTIONS)
     raise ValueError(
