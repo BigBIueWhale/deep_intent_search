@@ -19,11 +19,10 @@ MAX_TOKENS_PER_CHUNK = 1024
 
 # --- Helper Functions ---
 
-# For debug only
-def print_bounded_anchor(anchor: str, maxlen: int = 140) -> None:
+def get_bounded_anchor_preview(anchor: str, maxlen: int = 140) -> str:
     """
-    Prints a compact, single-line, clearly bounded preview of an anchor string.
-    Escapes control characters and trims while keeping both ends visible.
+    Returns the exact bounded preview string that print_bounded_anchor prints,
+    so we can feed it into the LLM conversation without altering the logs.
     """
     s = anchor or ""
     preview = (
@@ -35,7 +34,15 @@ def print_bounded_anchor(anchor: str, maxlen: int = 140) -> None:
     if len(preview) > maxlen:
         half = maxlen // 2
         preview = f"{preview[:half]} … {preview[-half:]}"
-    print(f"[BEGIN_ANCHOR len={len(s)}]{preview}[END_ANCHOR]")
+    return f"[BEGIN_ANCHOR len={len(s)}]{preview}[END_ANCHOR]"
+
+# For debug only
+def print_bounded_anchor(anchor: str, maxlen: int = 140) -> None:
+    """
+    Prints a compact, single-line, clearly bounded preview of an anchor string.
+    Escapes control characters and trims while keeping both ends visible.
+    """
+    print(get_bounded_anchor_preview(anchor, maxlen))
 
 def custom_span_tokenize(text: str) -> list[tuple[int, int]]:
     """
@@ -284,61 +291,88 @@ Full text:
 {section_text}
 ```"""
 
-    messages = [
-        {"role": "system", "content": "Adhere to the instructions as they are written, respond only in JSON."},
-        {"role": "user", "content": prompt},
-    ]
     split_index = -1
-    max_retries = 3
+    max_retries = 9  # 3 groups of 3 attempts
+    attempts_per_group = 3
+    total_attempts = 0
 
-    for attempt in range(max_retries):
-        try:
-            response = chat_complete(messages=messages, role="splitter", client=client, require_json=True)
-            print("", end='\n')
-            stats = print_stats(response)
-            if stats:
-                print(stats)
-            response_text = response.message.content
+    # We will run three groups. Each group starts a fresh conversation
+    # (system + initial user prompt). Within a group, we append feedback
+    # messages containing the exact warning lines that are already printed.
+    for group_idx in range(3):
+        messages = [
+            {"role": "system", "content": "Adhere to the instructions as they are written, respond only in JSON."},
+            {"role": "user", "content": prompt},
+        ]
 
-            json_start = response_text.find('{')
-            if json_start != -1:
-                response_text = response_text[json_start:]
-            json_end = response_text.rfind('}')
-            if json_end != -1:
-                response_text = response_text[:json_end + 1]
+        for attempt_in_group in range(attempts_per_group):
+            total_attempts += 1
+            try:
+                response = chat_complete(messages=messages, role="splitter", client=client, require_json=True)
+                print("", end='\n')
+                stats = print_stats(response)
+                if stats:
+                    print(stats)
+                response_text = response.message.content
 
-            split_data = json.loads(response_text)
-            split_string = split_data.get("begin_second_section")
+                json_start = response_text.find('{')
+                if json_start != -1:
+                    response_text = response_text[json_start:]
+                json_end = response_text.rfind('}')
+                if json_end != -1:
+                    response_text = response_text[:json_end + 1]
 
-            if split_string:
-                # IMPORTANT: We search for the returned string in the original, full-length text,
-                # not in the potentially smaller 'section_text' window.
-                found_index = text.find(split_string)
-                if found_index != -1:
-                    text_len = len(text)
-                    # Check for highly imbalanced splits. If one section has less than
-                    # 2% of the text, discard the LLM's suggestion.
-                    if text_len > 0 and (found_index < text_len * 0.02 or found_index > text_len * 0.98):
-                        percentage = (found_index / text_len) * 100
-                        print(f"Warning (Attempt {attempt + 1}): LLM proposed a highly imbalanced split ({percentage:.2f}%) of {text_len} chars. Discarding.")
-                        # By continuing, we treat this as a failed attempt, allowing retries or the fallback to trigger.
-                        continue
+                split_data = json.loads(response_text)
+                split_string = split_data.get("begin_second_section")
+
+                if split_string:
+                    # IMPORTANT: We search for the returned string in the original, full-length text,
+                    # not in the potentially smaller 'section_text' window.
+                    found_index = text.find(split_string)
+                    if found_index != -1:
+                        text_len = len(text)
+                        # Check for highly imbalanced splits. If one section has less than
+                        # 2% of the text, discard the LLM's suggestion.
+                        if text_len > 0 and (found_index < text_len * 0.02 or found_index > text_len * 0.98):
+                            percentage = (found_index / text_len) * 100
+                            warn_line = f"Warning (Attempt {total_attempts}): LLM proposed a highly imbalanced split ({percentage:.2f}%) of {text_len} chars. Discarding."
+                            print(warn_line)
+                            plea = "Please, just choose a split point in the **middle** of the text"
+                            # Feed the *exact* warning line back as a new user turn
+                            messages.append({"role": "user", "content": f"{warn_line}\n{plea}"})
+                            # Continue to next attempt (within same group until triplet is exhausted)
+                            pass
+                        else:
+                            split_index = found_index
+                            percentage = (split_index / text_len) * 100 if text_len > 0 else 0
+                            print(f"LLM identified a valid split point. Split {text_len} chars at {split_index} ({percentage:.1f}%).")
+                            break  # Success, exit the inner loop (and later the outer loop)
                     else:
-                        split_index = found_index
-                        percentage = (split_index / text_len) * 100 if text_len > 0 else 0
-                        print(f"LLM identified a valid split point. Split {text_len} chars at {split_index} ({percentage:.1f}%).")
-                        break  # Success, exit the retry loop
+                        warn_line = f"Warning (Attempt {total_attempts}): LLM-suggested string not found in text."
+                        print(warn_line)
+                        # Keep the console output identical:
+                        print_bounded_anchor(split_string)
+                        # Feed both the warning and the exact bounded-anchor text back as the next user turn
+                        bounded = get_bounded_anchor_preview(split_string)
+                        plea = "Please, just output the JSON with a working string to match **exactly** as it appears in the raw input to allow for a naive str.find() approach to work!"
+                        messages.append({"role": "user", "content": f"{warn_line}\n{bounded}\n{plea}"})
                 else:
-                    print(f"Warning (Attempt {attempt + 1}): LLM-suggested string not found in text.")
-                    print_bounded_anchor(split_string)
-            else:
-                print(f"Warning (Attempt {attempt + 1}): LLM response did not contain 'begin_second_section'.")
+                    print(f"Warning (Attempt {total_attempts}): LLM response did not contain 'begin_second_section'.")
 
-        except (json.JSONDecodeError, AttributeError, Exception) as e:
-            print(f"Warning (Attempt {attempt + 1}): An API or JSON parsing error occurred: {e}.")
+            except (json.JSONDecodeError, AttributeError, Exception) as e:
+                print(f"Warning (Attempt {total_attempts}): An API or JSON parsing error occurred: {e}.")
 
-        if attempt < max_retries - 1:
-            print("Retrying LLM call...")
+            # If succeeded, break out to avoid printing "Retrying..."
+            if split_index != -1:
+                break
+
+            if total_attempts < max_retries:
+                print("Retrying LLM call...")
+
+        # If succeeded inside this group, break out of outer loop too
+        if split_index != -1:
+            break
+        # Otherwise, group resets implicitly by reinitializing `messages` on next loop iteration.
 
     # 2. Fallback: If LLM fails after all retries, use a delimiter-based split.
     if split_index == -1:
