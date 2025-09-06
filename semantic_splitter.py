@@ -306,7 +306,7 @@ Full text:
         ]
 
         for attempt_in_group in range(attempts_per_group):
-            be_draconian = (group_idx >= max_groups/2) and (attempt_in_group == attempts_per_group - 1)
+            be_draconian = attempt_in_group == attempts_per_group - 1
             attempt_idx = group_idx * attempts_per_group + attempt_in_group
             try:
                 response = chat_complete(messages=messages, role="splitter", client=client, require_json=True)
@@ -343,8 +343,6 @@ Full text:
 - Your last split was grossly imbalanced. Choose `begin_second_section` whose FIRST CHARACTER INDEX lies strictly within [45%, 55%] of the provided text length. Anything outside this band is invalid.
 - Prefer a natural boundary at the nearest delimiter (newline, sentence end, or whitespace), but DO NOT move outside [45%, 55%].
 - The JSON value must be an exact, verbatim substring from the provided text, consisting of 3-5 words that uniquely identify the location. If your phrase is not unique, change it until it is unique (still 3-5 words).
-- Output ONLY JSON. No prose, no backticks, no code fences, no explanations.
-- Do not normalize or alter characters. No leading/trailing spaces. Avoid newlines/tabs inside the phrase; pick a single-line snippet.
 - If uncertain, take the 3-5 word phrase starting EXACTLY at the midpoint character of the provided text and expand rightward until uniqueness is achieved (max 5 words).
 Return the JSON now."""
                             plea = plea2 if be_draconian else plea1
@@ -371,6 +369,7 @@ Return the JSON now."""
 - No newlines/tabs. Prefer a snippet without JSON escapes (", \\\\, \\n, \\t); if present, pick a nearby clean snippet.
 - Must be UNIQUE in the full text; extend rightward (max 5 words) or shift slightly until unique.
 - No leading/trailing spaces; don't wrap in quotes/backticks unless those exact characters exist in the source.
+- Preserve original text artifacts such as double spaces or possible spelling mistakes
 - Sanity check: text.find(snippet) >= 0; first and last 3 chars match the source.
 - Output ONLY JSON with the single key "begin_second_section". Nothing else."""
                         plea = plea2 if be_draconian else plea1
