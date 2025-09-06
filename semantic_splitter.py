@@ -293,7 +293,7 @@ def read_progress_file(filepath: str) -> tuple[dict | None, list[int]]:
             pass
     return (meta, cuts)
 
-def ensure_meta(progress_path: str, file_index: int, path: str, size_bytes: int) -> dict:
+def ensure_meta(progress_path: str, file_index: int, path: str, size_chars: int) -> dict:
     """
     If progress file exists: return and validate its meta.
     Else: create meta (no manifest/hashes).
@@ -304,7 +304,7 @@ def ensure_meta(progress_path: str, file_index: int, path: str, size_bytes: int)
             "type": "meta",
             "file_index": file_index,
             "path": path,
-            "size_bytes": size_bytes,
+            "size_chars": size_chars,
             "max_tokens": MAX_TOKENS_PER_CHUNK,
             "context_window": CONTEXT_WINDOW_SIZE_TOKENS,
         }
@@ -317,8 +317,8 @@ def ensure_meta(progress_path: str, file_index: int, path: str, size_bytes: int)
         errs.append(f"- file_index mismatch: progress={existing_meta.get('file_index')} vs expected={file_index}")
     if existing_meta.get("path") != path:
         errs.append(f"- path mismatch: progress='{existing_meta.get('path')}' vs expected='{path}'")
-    if existing_meta.get("size_bytes") != size_bytes:
-        errs.append(f"- size_bytes mismatch: progress={existing_meta.get('size_bytes')} vs current={size_bytes}")
+    if existing_meta.get("size_chars") != size_chars:
+        errs.append(f"- size_chars mismatch: progress={existing_meta.get('size_chars')} vs current={size_chars}")
     if existing_meta.get("max_tokens") != MAX_TOKENS_PER_CHUNK:
         errs.append(f"- max_tokens mismatch: progress={existing_meta.get('max_tokens')} vs current={MAX_TOKENS_PER_CHUNK}")
     if existing_meta.get("context_window") != CONTEXT_WINDOW_SIZE_TOKENS:
