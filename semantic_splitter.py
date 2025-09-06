@@ -292,22 +292,22 @@ Full text:
 ```"""
 
     split_index = -1
-    max_groups = 6
-    attempts_per_group = 3
-    max_retries = attempts_per_group * max_groups
+    max_chat_attempts = 6
+    attempts_per_chat = 3
+    max_retries = attempts_per_chat * max_chat_attempts
 
     # We will run the groups. Each group starts a fresh conversation
     # (system + initial user prompt). Within a group, we append feedback
     # messages containing the exact warning lines that are already printed.
-    for attempt_group_idx in range(max_groups):
+    for attempt_chat_idx in range(max_chat_attempts):
         messages = [
             {"role": "system", "content": "Adhere to the instructions as they are written, respond only in JSON."},
             {"role": "user", "content": prompt},
         ]
 
-        for attempt_in_group in range(attempts_per_group):
-            be_draconian = attempt_in_group == attempts_per_group - 1
-            attempt_idx = attempt_group_idx * attempts_per_group + attempt_in_group
+        for attempt_in_chat in range(attempts_per_chat):
+            be_draconian = attempt_in_chat == attempts_per_chat - 1
+            attempt_idx = attempt_chat_idx * attempts_per_chat + attempt_in_chat
             try:
                 response = chat_complete(
                     messages=messages,
@@ -316,8 +316,8 @@ Full text:
                     # Fail fast on infinite generations, only
                     # has effect for models that don't emit <think> tag.
                     max_completion_tokens=256,
-                    # If we keep failing, do turn on the thinking
-                    please_no_thinking=(attempt_group_idx < 2),
+                    # If we keep failing, do turn on the thinking (if supported)
+                    please_no_thinking=(attempt_chat_idx < 2),
                     require_json=True
                 )
                 print("", end='\n')
