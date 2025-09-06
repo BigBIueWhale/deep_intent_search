@@ -655,7 +655,7 @@ if __name__ == "__main__":
             with open(input_filename, "r", encoding="utf-8", errors='ignore') as fr:
                 file_contents = fr.read()
         except FileNotFoundError:
-            raise FileNotFoundError(f"Error: The file '{input_filename}' was not found. Skipping.")
+            raise FileNotFoundError(f"Error: The file '{input_filename}' was not found")
 
         print(f"Original token count: {count_tokens(file_contents)}")
         print(f"Max tokens per chunk: {MAX_TOKENS_PER_CHUNK}\n")
