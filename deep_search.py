@@ -196,7 +196,16 @@ Respond with a JSON object in the following format and nothing else:
 
     for attempt in range(max_retries):
         try:
-            response = chat_complete(messages=messages, role="judge", client=CLIENT, require_json=True)
+            response = chat_complete(
+                messages=messages,
+                role="judge",
+                client=CLIENT,
+                # Fail fast on infinite generations, only
+                # has effect for models that don't emit <think> tag.
+                max_completion_tokens=2048,
+                please_no_thinking=True, # TODO: For now, test without thinking
+                require_json=True
+            )
             stats = print_stats(response)
             if stats:
                 print(stats)

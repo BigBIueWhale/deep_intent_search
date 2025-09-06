@@ -95,23 +95,41 @@ def get_model_name(role: str | None = None) -> str:
     
     return name
 
-# Advanced parameters for qwen3:32b (applied on every request)
-_QWEN3_32B_OPTIONS = {
+# Advanced parameters for qwen3:32b, applied on every request.
+# Shared across think & no-think.
+_QWEN3_32B_BASE_OPTIONS = {
     # Good context length value for 32GB VRAM and flash attention enabled
     # Ends up using ~31 GB in "ollama ps" when context length is full.
-    "num_ctx": 19456, # 19k
+    "num_ctx": 19456,  # 19k
+
     # Setting -1 (infinite) would cause infinite generation once in a while.
     # Infinite generations are observed to be exactly 239,998 thinking tokens
     # plus 2 response tokens.
     # Avoid the issue of Ollama call getting stuck waiting for almost 2 hours,
     # grinding the GPU for nothing on gibberish.
     "num_predict": 11264,
-    "temperature": 0.6,
+
+    # Shared sampling/guardrails for both modes
     "top_k": 20,
-    "top_p": 0.95,
     "min_p": 0.0,
     "repeat_penalty": 1.0,
-    "num_gpu": 65, # Layers to offload, all of them.
+
+    # Layers to offload, all of them.
+    "num_gpu": 65,
+}
+
+# Think mode settings recommended by Alibaba
+_QWEN3_32B_THINK_OPTIONS = {
+    **_QWEN3_32B_BASE_OPTIONS,
+    "temperature": 0.6,
+    "top_p": 0.95,
+}
+
+# No-think mode settings recommended by Alibaba
+_QWEN3_32B_NO_THINK_OPTIONS = {
+    **_QWEN3_32B_BASE_OPTIONS,
+    "temperature": 0.7,
+    "top_p": 0.8,
 }
 
 # Advanced parameters for qwen3:30b-a3b-thinking-2507-q4_K_M (applied on every request).
@@ -174,9 +192,13 @@ _GEMMA3_27B_OPTIONS = {
     "num_predict": 8192,
 }
 
-def get_ollama_options(model: str) -> dict:
+def get_ollama_options(model: str, please_no_thinking: bool) -> dict:
     if model == "qwen3:32b":
-        return dict(_QWEN3_32B_OPTIONS)
+        return dict(
+            _QWEN3_32B_NO_THINK_OPTIONS
+            if please_no_thinking
+            else _QWEN3_32B_THINK_OPTIONS
+        )
     if model == "qwen3:30b-a3b-thinking-2507-q4_K_M":
         return dict(_QWEN3_30B_A3B_THINKING_OPTIONS)
     if model == "qwen3:30b-a3b-instruct-2507-q4_K_M":
@@ -195,6 +217,10 @@ def _supports_thinking(model: str) -> bool:
         "qwen3:30b-a3b-thinking-2507-q4_K_M",
     }
 
+def _supports_qwen3_hybrid(model: str) -> bool:
+    return model in {
+        "qwen3:32b",
+    }
 
 _THINK_TAG_RE = re.compile(r"<think>(.*?)</think>", flags=re.DOTALL | re.IGNORECASE)
 
@@ -219,10 +245,12 @@ def _extract_thinking(message_obj: dict, can_think: bool, content: str) -> Optio
 
 
 def chat_complete(
-    messages: list[dict],
+    messages: list[dict[str, str]],
     role: str,
     client: httpx.Client,
-    require_json: bool = True,
+    max_completion_tokens: int, # Only used in non-thinking mode
+    please_no_thinking: bool,   # Only used for hybrid reasoning / non reasoning models
+    require_json: bool = True,  # Only used for models that don't emit <think> token
 ) -> ChatResponse:
     """
     Non-streaming call to Ollama's /api/chat using httpx, with hard read timeout.
@@ -235,8 +263,19 @@ def chat_complete(
         raise RuntimeError("httpx client is not initialized")
 
     model = get_model_name(role)
-    options = get_ollama_options(model)
+    options = get_ollama_options(model, please_no_thinking)
     can_think = _supports_thinking(model)
+    is_hybrid = _supports_qwen3_hybrid(model)
+
+    hybrid_nothink_switch = is_hybrid and please_no_thinking
+
+    if hybrid_nothink_switch:
+        # Insert "/no_think" at the beginning of the system prompt
+        system_prompt = messages[0]
+        system_prompt["content"] = f"/no_think {system_prompt["content"]}"
+
+    if hybrid_nothink_switch or not can_think:
+        options["num_predict"] = max_completion_tokens
 
     payload: dict[str, Any] = {
         "model": model,
@@ -249,9 +288,10 @@ def chat_complete(
     if require_json and not can_think:
         payload["format"] = "json"
 
-    # Simulate Ollama response structure
-    if can_think:
-        payload["think"] = True
+    if can_think and not hybrid_nothink_switch:
+        # Simulate Ollama response structure
+        if can_think:
+            payload["think"] = True
 
     url = f"{_base_url()}/api/chat"
 

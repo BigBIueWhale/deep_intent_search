@@ -309,7 +309,16 @@ Full text:
             be_draconian = attempt_in_group == attempts_per_group - 1
             attempt_idx = group_idx * attempts_per_group + attempt_in_group
             try:
-                response = chat_complete(messages=messages, role="splitter", client=client, require_json=True)
+                response = chat_complete(
+                    messages=messages,
+                    role="splitter",
+                    client=client,
+                    # Fail fast on infinite generations, only
+                    # has effect for models that don't emit <think> tag.
+                    max_completion_tokens=256,
+                    please_no_thinking=True, # TODO: For now, test without thinking
+                    require_json=True
+                )
                 print("", end='\n')
                 stats = print_stats(response)
                 if stats:
