@@ -386,7 +386,9 @@ Full text:
             {"role": "user", "content": prompt},
         ]
         for attempt_in_chat in range(attempts_per_chat):
-            be_draconian = attempt_in_chat == attempts_per_chat - 1
+            already_in_plea1 = len(messages) > 2
+            # Flag to apply angry prompt on next iteration of the loop
+            be_draconian = already_in_plea1
             attempt_idx = attempt_chat_idx * attempts_per_chat + attempt_in_chat
             try:
                 response = chat_complete(
