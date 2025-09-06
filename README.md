@@ -57,7 +57,7 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 #   - OLLAMA_MODEL_JUDGE is used by deep_search.py (relevance judging)
 #   - OLLAMA_MODEL_SPLITTER is used by semantic_splitter.py (chunk boundary finder)
 OLLAMA_MODEL_JUDGE=qwen3:32b
-OLLAMA_MODEL_SPLITTER=qwen3:30b-a3b-instruct-2507-q4_K_M
+OLLAMA_MODEL_SPLITTER=qwen3:32b
 ```
 
 > Pull models once:
@@ -73,12 +73,15 @@ The LLM is called with the metaparameters described in [./core/llm.py](./core/ll
 
 ## Per-model options
 
-- qwen3 models are thinking-capable in this project. Thinking is enabled through a single helper so callers do not duplicate flags.
-- gemma3:27b is not a thinking model here.
+- `qwen3:32b` is highly recommended for all tasks in this project. In its `/no_think` variable, it's a model of average reliability, probably even less reliable than `qwen3:30b-a3b-instruct-2507-q4_K_M`. But, since it's a hybrid reasoning model- upon multiple consecurive failures in [semantic_splitter.py](./semantic_splitter.py) we simply turn on thinking mode on the fly! Without having to unload and then load a different model into VRAM!
 
-Both tools call a single helper that chooses the right mode:
-- judge role (deep_search.py)
-- splitter role (semantic_splitter.py)
+- `JollyLlama/GLM-4-32B-0414-Q4_K_M` was an attempt to find a dense non-thinking model to be an `OLLAMA_MODEL_SPLITTER`, and it's definitely the most capable non-thinking model shown here that can fit on a single consumer GPU. Its high multilingual capabilities, and general world knowledge might prove useful.
+
+- `gemma3:27b` is extremely eager and that makes it unusable as a judge model. `qwen3:32b` (with thinking) might find 1 result in 1500+ sections, and `gemma3:27b` has been observed to find hundreds of "results" given the same prompt. Its vision capabilities and SoTA multilingual capabilities might prove useful.
+
+- `qwen3:30b-a3b-instruct-2507-q4_K_M` is the fastest non-thinking model (that actually works and is useful) to be able to fit on a consumer GPU. The attempt was to use it for `semantic_splitter.py` because it doesn't possess hybrid thinking capabilities, `qwen3:30b-a3b-thinking-2507-q4_K_M` is a different model, which means it would require unloading from GPU and loading a different model. Its speed and reliability (as much as a non-thinking model can be reliable) might prove crucial for speeding-up operations in this project.
+
+- `qwen3:30b-a3b-instruct-2507-q4_K_M` does so much thinking, to compensate for its measly 3 billion active parameters. The 200 tok/sec generation speed (on RTX 5090) might prove useful. However, it usually ends up taking longer than `qwen3:32b` just because it thinks to much. Oh, and `qwen3:32b` is definitely smarter and more reliable- so unclear what use-case this model might have.
 
 ## Search through the chunks
 First use [semantic_splitter.py](#split-the-files). Then once you have a folder [./split](./split/) containing ordered chunks of all the files, it's time to perform the deep search.
@@ -186,7 +189,7 @@ PS C:\Users\user\Downloads\deep_intent_search>
 😱 Running the tool is very expensive and slow. Estimated price $3.65 (GPT-5-nano pricing) for every search pass on the 7 books of Harry Potter- and that's not including the `semantic_splitter.py` step.
 
 Given that, future project goals could be-
-- Generate an extremely high-quality dataset of search results, will require generating synthetic intent-oriented search queries. Even if the synthetic intent-oriented search queries aren't extremely high-quality, the search results are the outcome of so much processing power `ThinkingConfig(thinking_budget=-1)` that the generated dataset will contain concentrated intelligence traces.
+- Generate an extremely high-quality dataset of search results, will require generating synthetic intent-oriented search queries. Even if the synthetic intent-oriented search queries aren't extremely high-quality, the search results are the outcome of so much processing power (especially with thinking turned on), that the generated dataset will contain concentrated intelligence traces.
 
 - Add **ELO tournament** scoring for the purpose of ordering the results from most relevant to least relevant.
 
