@@ -1,6 +1,7 @@
 import os
 import json
 import argparse
+import datetime
 from dotenv import load_dotenv
 
 from core.tokens import count_tokens
@@ -16,6 +17,9 @@ client = get_client()
 # Get context window size from environment variable, with a default.
 CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 8192))
 MAX_TOKENS_PER_CHUNK = 1024
+
+# For durable JSONL segments (same delimiter convention as deep_search.py)
+RECORD_DELIM = "\x1e"
 
 # --- Helper Functions ---
 
@@ -240,41 +244,119 @@ def fallback_split_by_delimiter(text: str) -> int:
     return best_split_point
 
 
-# --- Core Recursive Function ---
+# -------------------- Progress JSONL utilities --------------------
 
-def semantic_split(
-    text: str,
-    filename: str,
-    chunk_max_size_tokens: int = MAX_TOKENS_PER_CHUNK,
-    window_size: int = CONTEXT_WINDOW_SIZE_TOKENS,
-) -> list[str]:
+def write_json_record_append(filepath: str, obj: dict) -> None:
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write(json.dumps(obj, ensure_ascii=False))
+        f.write(RECORD_DELIM)
+        f.write("\n")
+        f.flush()                 # flush Python buffers
+        os.fsync(f.fileno())      # flush OS buffers (works on Windows & Linux)
+
+def read_progress_file(filepath: str) -> tuple[dict | None, list[int]]:
     """
-    Recursively splits a text into semantically coherent chunks based on LLM suggestions.
-    Retries the LLM call before using a delimiter-based fallback.
-
-    Args:
-        text: The block of text to be split.
-        filename: The name of the file the text belongs to (for use in the prompt).
-        chunk_max_size_tokens: The target maximum token size for a chunk.
-        window_size: Max tokens to expose to the LLM from the center of the text.
-
-    Returns:
-        A list of text chunks, each smaller than the token limit.
+    Robustly parse the per-file cuts JSONL (delimiter-separated).
+    Returns (meta, cuts). Skips malformed trailing fragments.
     """
-    # Base Case: If the text is already within the desired token limit, return it as a single chunk.
-    if count_tokens(text) <= chunk_max_size_tokens:
-        return [text]
+    meta = None
+    cuts: list[int] = []
+    if not os.path.exists(filepath):
+        return (None, cuts)
 
-    # --- Recursive Step ---
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            blob = f.read()
+    except Exception as e:
+        print(f"Warning: Could not read progress file '{os.path.basename(filepath)}': {e}")
+        return (None, cuts)
 
-    # If the text is larger than the window size, create a smaller, central window
-    # of the text to pass to the LLM. This is only for the LLM prompt.
-    text_token_count = count_tokens(text)
-    if text_token_count > window_size:
-        print(f"Text token count ({text_token_count}) exceeds window size ({window_size}). Creating a central window for the LLM.")
-        section_text = create_llm_window_from_center(text, window_size)
+    for seg in blob.split(RECORD_DELIM):
+        seg = seg.strip()
+        if not seg:
+            continue
+        try:
+            rec = json.loads(seg)
+        except json.JSONDecodeError:
+            # Most likely an interrupted last line; skip silently.
+            continue
+        t = rec.get("type")
+        if t == "meta" and meta is None:
+            meta = rec
+        elif t == "cut":
+            pos = rec.get("pos")
+            if isinstance(pos, int):
+                cuts.append(pos)
+        else:
+            # ignore unknown types; keep the format forward-compatible
+            pass
+    return (meta, cuts)
+
+def ensure_meta(progress_path: str, file_index: int, path: str, size_bytes: int) -> dict:
+    """
+    If progress file exists: return and validate its meta.
+    Else: create meta (no manifest/hashes).
+    """
+    existing_meta, _ = read_progress_file(progress_path)
+    if existing_meta is None:
+        meta = {
+            "type": "meta",
+            "file_index": file_index,
+            "path": path,
+            "size_bytes": size_bytes,
+            "max_tokens": MAX_TOKENS_PER_CHUNK,
+            "context_window": CONTEXT_WINDOW_SIZE_TOKENS,
+        }
+        write_json_record_append(progress_path, meta)
+        return meta
+
+    # Validate minimal invariants to keep resume foolproof.
+    errs = []
+    if existing_meta.get("file_index") != file_index:
+        errs.append(f"- file_index mismatch: progress={existing_meta.get('file_index')} vs expected={file_index}")
+    if existing_meta.get("path") != path:
+        errs.append(f"- path mismatch: progress='{existing_meta.get('path')}' vs expected='{path}'")
+    if existing_meta.get("size_bytes") != size_bytes:
+        errs.append(f"- size_bytes mismatch: progress={existing_meta.get('size_bytes')} vs current={size_bytes}")
+    if existing_meta.get("max_tokens") != MAX_TOKENS_PER_CHUNK:
+        errs.append(f"- max_tokens mismatch: progress={existing_meta.get('max_tokens')} vs current={MAX_TOKENS_PER_CHUNK}")
+    if existing_meta.get("context_window") != CONTEXT_WINDOW_SIZE_TOKENS:
+        errs.append(f"- context_window mismatch: progress={existing_meta.get('context_window')} vs current={CONTEXT_WINDOW_SIZE_TOKENS}")
+
+    if errs:
+        msg = "Refusing to resume due to incompatible progress file:\n" + "\n".join(errs) + \
+              f"\nProgress file: {progress_path}\nTip: move/delete this file or re-run with a stable file list."
+        raise RuntimeError(msg)
+
+    return existing_meta
+
+def build_boundaries(text_len: int, cuts: list[int]) -> list[int]:
+    uniq = sorted({p for p in cuts if isinstance(p, int) and 0 < p < text_len})
+    return [0] + uniq + [text_len]
+
+def first_oversized_segment(text: str, boundaries: list[int]) -> tuple[int, int] | None:
+    for i in range(len(boundaries)-1):
+        lo, hi = boundaries[i], boundaries[i+1]
+        if count_tokens(text[lo:hi]) > MAX_TOKENS_PER_CHUNK:
+            return (lo, hi)
+    return None
+
+# -------------------- One-split proposer (segment-scoped) --------------------
+
+def propose_split_index_for_segment(full_text: str, seg_lo: int, seg_hi: int, filename: str) -> int:
+    """
+    Run the same LLM cascade as your recursive splitter, but restricted to [seg_lo:seg_hi].
+    Returns the absolute split index in the full_text (NOT relative), or -1 on failure.
+    """
+    segment = full_text[seg_lo:seg_hi]
+    # If the segment is larger than the window, use a central window for the LLM.
+    seg_token_count = count_tokens(segment)
+    if seg_token_count > CONTEXT_WINDOW_SIZE_TOKENS:
+        print(f"Text token count ({seg_token_count}) exceeds window size ({CONTEXT_WINDOW_SIZE_TOKENS}). Creating a central window for the LLM.")
+        section_text = create_llm_window_from_center(segment, CONTEXT_WINDOW_SIZE_TOKENS)
     else:
-        section_text = text
+        section_text = segment
 
     prompt = f"""I will provide a large block of text.
 The task is: split the large block of text into exactly 2 blocks of text.
@@ -296,15 +378,11 @@ Full text:
     attempts_per_chat = 3
     max_retries = attempts_per_chat * max_chat_attempts
 
-    # We will run the groups. Each group starts a fresh conversation
-    # (system + initial user prompt). Within a group, we append feedback
-    # messages containing the exact warning lines that are already printed.
     for attempt_chat_idx in range(max_chat_attempts):
         messages = [
             {"role": "system", "content": "Adhere to the instructions as they are written, respond only in JSON."},
             {"role": "user", "content": prompt},
         ]
-
         for attempt_in_chat in range(attempts_per_chat):
             be_draconian = attempt_in_chat == attempts_per_chat - 1
             attempt_idx = attempt_chat_idx * attempts_per_chat + attempt_in_chat
@@ -313,10 +391,7 @@ Full text:
                     messages=messages,
                     role="splitter",
                     client=client,
-                    # Fail fast on infinite generations, only
-                    # has effect for models that don't emit <think> tag.
                     max_completion_tokens=256,
-                    # If we keep failing, do turn on the thinking (if supported)
                     please_no_thinking=(attempt_chat_idx < 2),
                     require_json=True
                 )
@@ -337,16 +412,14 @@ Full text:
                 split_string = split_data.get("begin_second_section")
 
                 if split_string:
-                    # IMPORTANT: We search for the returned string in the original, full-length text,
-                    # not in the potentially smaller 'section_text' window.
-                    found_index = text.find(split_string)
-                    if found_index != -1:
-                        text_len = len(text)
-                        # Check for highly imbalanced splits. If one section has less than
-                        # 2% of the text, discard the LLM's suggestion.
-                        if text_len > 0 and (found_index < text_len * 0.02 or found_index > text_len * 0.98):
-                            percentage = (found_index / text_len) * 100
-                            warn_line = f"Warning (Attempt {attempt_idx + 1}): LLM proposed a highly imbalanced split ({percentage:.2f}%) of {text_len} chars. Discarding."
+                    # Search INSIDE THE SEGMENT ONLY
+                    found_rel = segment.find(split_string)
+                    if found_rel != -1:
+                        text_len = len(segment)
+                        # Reject gross imbalance near edges of THIS segment.
+                        if text_len > 0 and (found_rel < text_len * 0.02 or found_rel > text_len * 0.98):
+                            percentage = (found_rel / text_len) * 100
+                            warn_line = f"Warning (Attempt {attempt_idx + 1}): LLM proposed a highly imbalanced split within segment ({percentage:.2f}%) of {text_len} chars. Discarding."
                             print(warn_line)
                             plea1 = "Fix it by changing `begin_second_section` to somewhere in the **middle** of the text"
                             plea2 = """DRACONIAN OVERRIDE:
@@ -357,71 +430,166 @@ Full text:
 - If uncertain, take the 3-5 word phrase starting EXACTLY at the midpoint character of the provided text and expand rightward until uniqueness is achieved (max 5 words).
 Return the JSON now."""
                             plea = plea2 if be_draconian else plea1
-                            # Feed the *exact* warning line back as a new user turn
                             messages.append({"role": "user", "content": f"{warn_line}\n{plea}"})
-                            # Continue to next attempt (within same group until triplet is exhausted)
-                            pass
                         else:
-                            split_index = found_index
-                            percentage = (split_index / text_len) * 100 if text_len > 0 else 0
-                            print(f"LLM identified a valid split point. Split {text_len} chars at {split_index} ({percentage:.1f}%).")
-                            break  # Success, exit the inner loop (and later the outer loop)
+                            abs_index = seg_lo + found_rel
+                            percentage = (found_rel / text_len) * 100 if text_len > 0 else 0
+                            print(f"LLM identified a valid split point within segment. Split {text_len} chars at {found_rel} ({percentage:.1f}%).")
+                            split_index = abs_index
+                            break
                     else:
-                        warn_line = f"Warning (Attempt {attempt_idx + 1}): LLM-suggested string not found in text."
+                        warn_line = f"Warning (Attempt {attempt_idx + 1}): LLM-suggested string not found in segment."
                         print(warn_line)
-                        # Keep the console output identical:
                         print_bounded_anchor(split_string)
-                        # Feed both the warning and the exact bounded-anchor text back as the next user turn
                         bounded = get_bounded_anchor_preview(split_string)
                         plea1 = "Fix it by changing `begin_second_section` to a short string that can be found and searched easily"
                         plea2 = """PRECISION MODE (DRACONIAN):
 - Set "begin_second_section" to a SHORT, SINGLE-LINE, EXACT substring (3-5 words) from the text.
 - Copy characters exactly: space(s), punctuation, case, diacritics, dashes. No normalization or spelling fixes.
-- No newlines/tabs. Prefer a snippet without JSON escapes (", \\\\, \\n, \\t); if present, pick a nearby clean snippet.
-- Must be UNIQUE in the full text; extend rightward (max 5 words) or shift slightly until unique.
+- No newlines/tabs. Prefer a snippet without JSON escapes (\", \\\\, \\n, \\t); if present, pick a nearby clean snippet.
+- Must be UNIQUE in the provided text; extend rightward (max 5 words) or shift slightly until unique.
 - No leading/trailing spaces; don't wrap in quotes/backticks unless those exact characters exist in the source.
 - Preserve original text artifacts such as double spaces or possible spelling mistakes
-- Sanity check: text.find(snippet) >= 0; first and last 3 chars match the source.
-- Output ONLY JSON with the single key "begin_second_section". Nothing else."""
+- Sanity check: segment.find(snippet) >= 0; first and last 3 chars match the source.
+- Output ONLY JSON with the single key \"begin_second_section\". Nothing else."""
                         plea = plea2 if be_draconian else plea1
                         messages.append({"role": "user", "content": f"{warn_line}\n{bounded}\n{plea}"})
                 else:
                     print(f"Warning (Attempt {attempt_idx + 1}): LLM response did not contain 'begin_second_section'.")
-
             except (json.JSONDecodeError, AttributeError, Exception) as e:
                 print(f"Warning (Attempt {attempt_idx + 1}): An API or JSON parsing error occurred: {e}.")
 
-            # If succeeded, break out to avoid printing "Retrying..."
             if split_index != -1:
                 break
-
             if attempt_idx < max_retries:
                 print("Retrying LLM call...")
 
-        # If succeeded inside this group, break out of outer loop too
         if split_index != -1:
             break
-        # Otherwise, group resets implicitly by reinitializing `messages` on next loop iteration.
 
-    # 2. Fallback: If LLM fails after all retries, use a delimiter-based split.
+    # Fallbacks restricted to segment:
     if split_index == -1:
         print("LLM splitting failed after all retries.")
-        split_index = fallback_split_by_delimiter(text)
-        # Final safety net if delimiter splitting also fails
-        if split_index == -1:
+        rel = fallback_split_by_delimiter(segment)
+        if rel == -1:
             print("Delimiter splitting failed. Reverting to naive middle split.")
-            split_index = len(text) // 2
+            rel = len(segment) // 2
+        split_index = seg_lo + rel
 
-    # 3. Perform the split and recurse on both halves.
-    part1 = text[:split_index]
-    part2 = text[split_index:]
+    return split_index
 
-    # The first part always touches the original chunk's start.
-    # The second part always touches the original chunk's end.
-    results1 = semantic_split(part1, filename, chunk_max_size_tokens)
-    results2 = semantic_split(part2, filename, chunk_max_size_tokens)
+# -------------------- NEW: Driver that uses per-file cut indexes --------------------
 
-    return results1 + results2
+def process_file_with_cuts(file_index: int, input_filename: str, progress_dir: str) -> bool:
+    """
+    Happy path behavior:
+      - Starting anew: creates progress file with meta, then iteratively appends cuts.
+      - In-progress: replays cuts, continues from leftmost oversized segment.
+      - Already done: returns immediately.
+
+    Returns True if the file is complete (all segments <= MAX), else False.
+    """
+    progress_path = os.path.join(progress_dir, f"{str(file_index).zfill(4)}.cuts.jsonl")
+
+    try:
+        with open(input_filename, "r", encoding="utf-8", errors='ignore') as fr:
+            file_contents = fr.read()
+    except FileNotFoundError:
+        print(f"Error: The file '{input_filename}' was not found.")
+        return True  # treat as "nothing to do" to let the loop continue
+
+    meta = ensure_meta(progress_path, file_index, input_filename, len(file_contents))
+
+    # Replay existing progress
+    _, cuts = read_progress_file(progress_path)
+
+    while True:
+        boundaries = build_boundaries(len(file_contents), cuts)
+        seg = first_oversized_segment(file_contents, boundaries)
+        if seg is None:
+            # file done
+            return True
+
+        lo, hi = seg
+        # Propose a split inside [lo:hi)
+        split_abs = propose_split_index_for_segment(file_contents, lo, hi, input_filename)
+        # Guard against duplicates and near-edges
+        if split_abs <= lo or split_abs >= hi:
+            print(f"Warning: Proposed split {split_abs} outside segment ({lo},{hi}). Forcing midpoint.")
+            split_abs = lo + (hi - lo) // 2
+        if split_abs in cuts:
+            # Very rare, but keep loop progressing
+            print("Info: Proposed split already exists; nudging by +1.")
+            split_abs = min(hi-1, split_abs + 1)
+            if split_abs in cuts or split_abs <= lo or split_abs >= hi:
+                # fallback hard midpoint if still invalid
+                split_abs = lo + (hi - lo) // 2
+
+        # Append the new cut (durable)
+        write_json_record_append(progress_path, {"type": "cut", "pos": int(split_abs)})
+        cuts.append(int(split_abs))
+        # loop continues to re-evaluate from the leftmost oversized segment
+
+
+def all_files_complete(file_paths: list[str], progress_dir: str) -> bool:
+    for idx, path in enumerate(file_paths, start=1):
+        p = os.path.join(progress_dir, f"{str(idx).zfill(4)}.cuts.jsonl")
+        try:
+            with open(path, "r", encoding="utf-8", errors='ignore') as fr:
+                text = fr.read()
+        except FileNotFoundError:
+            return False
+        _, cuts = read_progress_file(p)
+        boundaries = build_boundaries(len(text), cuts)
+        if first_oversized_segment(text, boundaries) is not None:
+            return False
+    return True
+
+
+def finalize_chunks(file_paths: list[str], output_dir: str, progress_dir: str) -> None:
+    """
+    Finalization pass: derive segments from cuts and materialize into ./split/chunks/
+    with global numbering. Uses temp+rename for each file.
+    """
+    chunks_dir = os.path.join(output_dir, "chunks")
+    tmp_dir = chunks_dir + ".tmp"
+    if os.path.exists(chunks_dir):
+        raise FileExistsError(f"Output chunks directory already exists: {chunks_dir}. Refusing to overwrite.")
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    global_index = 0
+    for idx, path in enumerate(file_paths, start=1):
+        p = os.path.join(progress_dir, f"{str(idx).zfill(4)}.cuts.jsonl")
+        with open(path, "r", encoding="utf-8", errors='ignore') as fr:
+            text = fr.read()
+        _, cuts = read_progress_file(p)
+        boundaries = build_boundaries(len(text), cuts)
+
+        # Sanity check: ensure all segments are compliant
+        for i in range(len(boundaries)-1):
+            lo, hi = boundaries[i], boundaries[i+1]
+            if count_tokens(text[lo:hi]) > MAX_TOKENS_PER_CHUNK:
+                raise RuntimeError(f"Finalization aborted: file {idx} still has an oversized segment ({lo},{hi}).")
+
+        # Emit chunks in order
+        for i in range(len(boundaries)-1):
+            lo, hi = boundaries[i], boundaries[i+1]
+            global_index += 1
+            out_tmp = os.path.join(tmp_dir, f"{str(global_index).zfill(6)}.txt.tmp")
+            out_final = os.path.join(tmp_dir, f"{str(global_index).zfill(6)}.txt")
+            header = f"SOURCE {path} (start:{lo} end:{hi})\n"
+            with open(out_tmp, "w", encoding="utf-8") as fw:
+                fw.write(header)
+                fw.write(text[lo:hi])
+            os.replace(out_tmp, out_final)
+            tok = count_tokens(text[lo:hi])
+            print(f"Saved chunk {global_index} to '{out_final}' (from '{path}', Tokens: {tok})")
+
+    # Atomically move tmp → final location
+    os.replace(tmp_dir, chunks_dir)
+
+    print(f"--- All chunks saved successfully in the '{chunks_dir}/' directory. ---")
+
 
 if __name__ == "__main__":
     # --- Command-Line Argument Parsing ---
@@ -429,7 +597,7 @@ if __name__ == "__main__":
         description="Split one or more large text files into smaller, semantically coherent chunks."
     )
     parser.add_argument(
-        "--file",
+        "--files",
         type=str,
         required=True,
         nargs='+',  # Accept one or more file arguments
@@ -439,32 +607,50 @@ if __name__ == "__main__":
         "--output-dir",
         type=str,
         default="split",
-        help="The directory to save the output chunks. Defaults to 'split'. The script will exit if this directory already exists."
+        help="The directory to save the output chunks. Defaults to 'split'."
     )
     args = parser.parse_args()
 
-    if not args.file:
+    if not args.files:
         raise ValueError(
-            "Error: No input files specified. Please provide at least one file using the --file argument."
+            "Error: No input files specified. Please provide at least one file using the --files argument."
         )
 
     output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
+    progress_dir = os.path.join(output_dir, "progress")
+    os.makedirs(progress_dir, exist_ok=True)
 
-    # Check if the output directory already exists.
-    if os.path.exists(output_dir):
-        # Raising an error is more Pythonic and provides a clearer traceback.
-        raise FileExistsError(
-            f"Output directory '{output_dir}' already exists. "
-            "Please specify a new directory with --output-dir or remove the existing one."
-        )
+    # Happy path #1: Starting anew (no progress files yet) → meta lines created lazily.
 
-    # Create the output directory
-    os.makedirs(output_dir)
+    # Happy path #2/#3 + edge cases:
+    # - If progress files exist and are "done" (all segments small enough) → finalize.
+    # - If progress files exist and are in-progress → resume from the leftmost oversized segment.
+    # - If progress files contain an invalid trailing record → ignored during replay.
 
-    global_chunk_counter = 0
+    # Additional guard: refuse if there are stale extra progress files not matching CLI length.
+    progress_files = sorted([f for f in os.listdir(progress_dir) if f.endswith(".cuts.jsonl")])
+    max_allowed = len(args.files)
+    for fname in progress_files:
+        try:
+            idx = int(os.path.splitext(os.path.splitext(fname)[0])[0])
+        except Exception:
+            raise RuntimeError(f"Unexpected file in progress dir: {fname}")
+        if idx < 1 or idx > max_allowed:
+            raise RuntimeError(
+                f"Progress file '{fname}' has index {idx} which is outside the current file list (1..{max_allowed}).\n"
+                f"Refusing to proceed to avoid mismatched resumes. Move/delete the stale file to continue."
+            )
 
-    # --- File Processing Loop ---
-    for input_filename in args.file:
+    # Check if all complete already
+    if all_files_complete(args.files, progress_dir):
+        print("--- Progress indicates all files are already split. Finalizing into chunks... ---")
+        finalize_chunks(args.files, output_dir, progress_dir)
+        raise SystemExit(0)
+
+    # --- File Processing Loop (sequential, resumable) ---
+    for file_idx, input_filename in enumerate(args.files, start=1):
+        print(f"--- Splitting file: {input_filename} ---")
         try:
             with open(input_filename, "r", encoding="utf-8", errors='ignore') as fr:
                 file_contents = fr.read()
@@ -472,43 +658,18 @@ if __name__ == "__main__":
             print(f"Error: The file '{input_filename}' was not found. Skipping.")
             continue  # Skip to the next file in the list
 
-        print(f"--- Splitting file: {input_filename} ---")
         print(f"Original token count: {count_tokens(file_contents)}")
         print(f"Max tokens per chunk: {MAX_TOKENS_PER_CHUNK}\n")
 
-        # Call the main function to start the splitting process for the current file.
-        chunks = semantic_split(text=file_contents, filename=input_filename)
+        done = process_file_with_cuts(file_idx, input_filename, progress_dir)
+        if done:
+            print(f"--- File '{input_filename}' is complete. ---\n")
+        else:
+            print(f"--- File '{input_filename}' in progress. ---\n")
 
-        num_chunks_for_this_file = len(chunks)
-        if num_chunks_for_this_file > 0:
-            print(f"--- File '{input_filename}' split into {num_chunks_for_this_file} chunks. Saving... ---\n")
-
-        # --- Saving Output Chunks for the current file ---
-        for i, chunk in enumerate(chunks):
-            global_chunk_counter += 1
-            chunk_num_for_this_file = i + 1
-
-            # Format the filename with a global, incrementing counter
-            output_filename = os.path.join(output_dir, f"{str(global_chunk_counter).zfill(6)}.txt")
-
-            # Create the header with the file-specific chunk count
-            header = f"SOURCE {input_filename} (Chunk {chunk_num_for_this_file}/{num_chunks_for_this_file})\n"
-
-            with open(output_filename, "w", encoding="utf-8") as fw:
-                # Prepend the new header
-                fw.write(header)
-                fw.write(chunk)
-
-            chunk_token_count = count_tokens(chunk)
-            print(f"Saved chunk {chunk_num_for_this_file}/{num_chunks_for_this_file} to '{output_filename}' (from '{input_filename}', Tokens: {chunk_token_count})")
-
-        # Add a newline for better visual separation between file processing in the console
-        if num_chunks_for_this_file > 0:
-            print("\n")
-
-    # --- Final Summary ---
-    if global_chunk_counter == 0:
-        print("\n--- No chunks were generated. ---")
+    # --- Final Summary / Finalization ---
+    if all_files_complete(args.files, progress_dir):
+        print(f"--- Completed: All {len(args.files)} file(s) have compliant segments. Materializing chunks... ---")
+        finalize_chunks(args.files, output_dir, progress_dir)
     else:
-        print(f"--- Completed: Split {len(args.file)} file(s) into a total of {global_chunk_counter} chunks. ---")
-        print(f"--- All chunks saved successfully in the '{output_dir}/' directory. ---")
+        print("\n--- Progress saved. Resume later to continue splitting. ---")

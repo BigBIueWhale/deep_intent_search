@@ -347,6 +347,8 @@ def write_json_record_append(filepath: str, obj: Dict[str, Any]) -> None:
         f.write(json.dumps(obj, ensure_ascii=False))
         f.write(RECORD_DELIM)
         f.write("\n")
+        f.flush()                 # flush Python buffers
+        os.fsync(f.fileno())      # flush OS buffers (works on Windows & Linux)
 
 def assert_compatible_with_current_chunks(meta: Dict[str, Any], current_total_chunks: int) -> None:
     meta_orig = meta.get("original_total_chunks")
