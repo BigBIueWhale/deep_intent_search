@@ -299,7 +299,7 @@ Full text:
     # We will run the groups. Each group starts a fresh conversation
     # (system + initial user prompt). Within a group, we append feedback
     # messages containing the exact warning lines that are already printed.
-    for group_idx in range(max_groups):
+    for attempt_group_idx in range(max_groups):
         messages = [
             {"role": "system", "content": "Adhere to the instructions as they are written, respond only in JSON."},
             {"role": "user", "content": prompt},
@@ -307,7 +307,7 @@ Full text:
 
         for attempt_in_group in range(attempts_per_group):
             be_draconian = attempt_in_group == attempts_per_group - 1
-            attempt_idx = group_idx * attempts_per_group + attempt_in_group
+            attempt_idx = attempt_group_idx * attempts_per_group + attempt_in_group
             try:
                 response = chat_complete(
                     messages=messages,
@@ -316,7 +316,8 @@ Full text:
                     # Fail fast on infinite generations, only
                     # has effect for models that don't emit <think> tag.
                     max_completion_tokens=256,
-                    please_no_thinking=True, # TODO: For now, test without thinking
+                    # If we keep failing, do turn on the thinking
+                    please_no_thinking=(attempt_group_idx < 2),
                     require_json=True
                 )
                 print("", end='\n')
