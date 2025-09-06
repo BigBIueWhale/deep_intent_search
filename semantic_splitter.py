@@ -292,21 +292,21 @@ Full text:
 ```"""
 
     split_index = -1
-    max_retries = 9  # 3 groups of 3 attempts
+    max_groups = 3
     attempts_per_group = 3
-    total_attempts = 0
+    max_retries = attempts_per_group * max_groups
 
-    # We will run three groups. Each group starts a fresh conversation
+    # We will run the groups. Each group starts a fresh conversation
     # (system + initial user prompt). Within a group, we append feedback
     # messages containing the exact warning lines that are already printed.
-    for group_idx in range(3):
+    for group_idx in range(max_groups):
         messages = [
             {"role": "system", "content": "Adhere to the instructions as they are written, respond only in JSON."},
             {"role": "user", "content": prompt},
         ]
 
         for attempt_in_group in range(attempts_per_group):
-            total_attempts += 1
+            attempt_idx = group_idx * attempts_per_group + attempt_in_group
             try:
                 response = chat_complete(messages=messages, role="splitter", client=client, require_json=True)
                 print("", end='\n')
@@ -335,9 +335,9 @@ Full text:
                         # 2% of the text, discard the LLM's suggestion.
                         if text_len > 0 and (found_index < text_len * 0.02 or found_index > text_len * 0.98):
                             percentage = (found_index / text_len) * 100
-                            warn_line = f"Warning (Attempt {total_attempts}): LLM proposed a highly imbalanced split ({percentage:.2f}%) of {text_len} chars. Discarding."
+                            warn_line = f"Warning (Attempt {attempt_idx + 1}): LLM proposed a highly imbalanced split ({percentage:.2f}%) of {text_len} chars. Discarding."
                             print(warn_line)
-                            plea = "Please, just choose a split point in the **middle** of the text"
+                            plea = "Fix it by changing `begin_second_section` to somewhere in the **middle** of the text"
                             # Feed the *exact* warning line back as a new user turn
                             messages.append({"role": "user", "content": f"{warn_line}\n{plea}"})
                             # Continue to next attempt (within same group until triplet is exhausted)
@@ -348,25 +348,25 @@ Full text:
                             print(f"LLM identified a valid split point. Split {text_len} chars at {split_index} ({percentage:.1f}%).")
                             break  # Success, exit the inner loop (and later the outer loop)
                     else:
-                        warn_line = f"Warning (Attempt {total_attempts}): LLM-suggested string not found in text."
+                        warn_line = f"Warning (Attempt {attempt_idx + 1}): LLM-suggested string not found in text."
                         print(warn_line)
                         # Keep the console output identical:
                         print_bounded_anchor(split_string)
                         # Feed both the warning and the exact bounded-anchor text back as the next user turn
                         bounded = get_bounded_anchor_preview(split_string)
-                        plea = "Please, just output the JSON with a working string to match **exactly** as it appears in the raw input to allow for a naive str.find() approach to work!"
+                        plea = "Fix it by changing `begin_second_section` to a short string that can be found and searched easily"
                         messages.append({"role": "user", "content": f"{warn_line}\n{bounded}\n{plea}"})
                 else:
-                    print(f"Warning (Attempt {total_attempts}): LLM response did not contain 'begin_second_section'.")
+                    print(f"Warning (Attempt {attempt_idx + 1}): LLM response did not contain 'begin_second_section'.")
 
             except (json.JSONDecodeError, AttributeError, Exception) as e:
-                print(f"Warning (Attempt {total_attempts}): An API or JSON parsing error occurred: {e}.")
+                print(f"Warning (Attempt {attempt_idx + 1}): An API or JSON parsing error occurred: {e}.")
 
             # If succeeded, break out to avoid printing "Retrying..."
             if split_index != -1:
                 break
 
-            if total_attempts < max_retries:
+            if attempt_idx < max_retries:
                 print("Retrying LLM call...")
 
         # If succeeded inside this group, break out of outer loop too
