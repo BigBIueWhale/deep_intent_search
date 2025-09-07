@@ -60,6 +60,7 @@ class ChatResponse:
     prompt_eval_count: Optional[int] = None
     eval_duration: Optional[int] = None          # nanoseconds (includes think+response)
     eval_count: Optional[int] = None             # tokens generated (incl. think where applicable)
+    ran_out_of_tokens: bool = False
 
 
 def get_client() -> httpx.Client | None:
@@ -313,6 +314,7 @@ def chat_complete(
     prompt_eval_count = data.get("prompt_eval_count")
     eval_duration = data.get("eval_duration")
     eval_count = data.get("eval_count")
+    done_reason = data.get("done_reason", "")
 
     # Simulate Ollama response structure
     return ChatResponse(
@@ -325,6 +327,7 @@ def chat_complete(
         prompt_eval_count=prompt_eval_count,
         eval_duration=eval_duration,
         eval_count=eval_count,
+        ran_out_of_tokens=(done_reason.lower() == 'length')
     )
 
 

@@ -396,7 +396,7 @@ Full text:
                     role="splitter",
                     client=client,
                     max_completion_tokens=256,
-                    please_no_thinking=(attempt_chat_idx < 2),
+                    please_no_thinking=attempt_chat_idx < 2,
                     require_json=True
                 )
                 print("", end='\n')
@@ -404,6 +404,11 @@ Full text:
                 if stats:
                     print(stats)
                 response_text = response.message.content
+                thinking_length = len(response.message.thinking) if response.message.thinking else 0
+                if response.ran_out_of_tokens and thinking_length > 10:
+                    print(f"Run away. The data is poisonous. Our poor model is going into infinite generations. seg_lo: {seg_lo}, seg_hi: {seg_hi}")
+                    attempt_chat_idx = max_chat_attempts
+                    break
 
                 json_start = response_text.find('{')
                 if json_start != -1:
@@ -467,9 +472,11 @@ Return the JSON now."""
                 break
             if attempt_idx < max_retries:
                 print("Retrying LLM call...")
-
-        if split_index != -1:
-            break
+        else:
+            # inner didn't break → (possibly) keep outer going
+            if split_index == -1:
+                continue
+        break # inner did break → break outer too
 
     # Fallbacks restricted to segment:
     if split_index == -1:
