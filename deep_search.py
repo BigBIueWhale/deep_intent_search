@@ -362,7 +362,7 @@ def assert_compatible_with_current_chunks(meta: Dict[str, Any], current_total_ch
             "The newest run file refers to a different number of original chunks than what is currently loaded.\n"
             f"- File says original_total_chunks = {meta_orig}\n"
             f"- Currently loaded chunks       = {current_total_chunks}\n\n"
-            "This usually means your 'split' directory changed since the run was created.\n"
+            "This usually means your 'split/chunks' directory changed since the run was created.\n"
             "To proceed safely, delete the './search_runs' folder and run again so a new series can be created."
         )
 
@@ -394,7 +394,7 @@ def main():
         description="Perform a deep, contextual search through text chunks using an LLM."
     )
     parser.add_argument("--query", type=str, required=True, help="The search query for this run.")
-    parser.add_argument("--dir", type=str, default="split", help="The directory containing the text chunks (default: 'split').")
+    parser.add_argument("--dir", type=str, default="split/chunks", help="The directory containing the text chunks (default: 'split/chunks').")
     parser.add_argument("--outdir", type=str, default='search_runs', help="Directory for JSONL run files (default: './search_runs').")
     args = parser.parse_args()
 
