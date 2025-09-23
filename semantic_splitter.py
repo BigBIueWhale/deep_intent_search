@@ -569,6 +569,9 @@ def finalize_chunks(file_paths: list[str], output_dir: str, progress_dir: str) -
     """
     Finalization pass: derive segments from cuts and materialize into ./split/chunks/
     with global numbering. Uses temp+rename for each file.
+
+    Each chunk file starts with a single-line header, e.g.:
+    [Chunk 7/52 | File 2/5 | Source: /path/to/file.txt | chars:12345-16789 | tokens:987]
     """
     chunks_dir = os.path.join(output_dir, "chunks")
     tmp_dir = chunks_dir + ".tmp"
@@ -577,36 +580,58 @@ def finalize_chunks(file_paths: list[str], output_dir: str, progress_dir: str) -
     os.makedirs(tmp_dir, exist_ok=True)
 
     global_index = 0
-    for idx, path in enumerate(file_paths, start=1):
-        p = os.path.join(progress_dir, f"{str(idx).zfill(6)}.cuts.jsonl")
+
+    for file_idx, path in enumerate(file_paths, start=1):
+        progress_path = os.path.join(progress_dir, f"{str(file_idx).zfill(6)}.cuts.jsonl")
         with open(path, "r", encoding="utf-8", errors='ignore') as fr:
             text = fr.read()
-        _, cuts = read_progress_file(p)
+        _, cuts = read_progress_file(progress_path)
         boundaries = build_boundaries(len(text), cuts)
 
         # Sanity check: ensure all segments are compliant
         for i in range(len(boundaries)-1):
             lo, hi = boundaries[i], boundaries[i+1]
             if count_tokens(text[lo:hi]) > MAX_TOKENS_PER_CHUNK:
-                raise RuntimeError(f"Finalization aborted: file {idx} still has an oversized segment ({lo},{hi}).")
+                raise RuntimeError(f"Finalization aborted: file {file_idx} still has an oversized segment ({lo},{hi}).")
+
+        # Per-file counters
+        total_in_file = len(boundaries) - 1
+        local_index = 0
 
         # Emit chunks in order
         for i in range(len(boundaries)-1):
             lo, hi = boundaries[i], boundaries[i+1]
+            local_index += 1
             global_index += 1
+
+            # Compute tokens first so the header can include it
+            content = text[lo:hi]
+            tok = count_tokens(content)
+
             out_tmp = os.path.join(tmp_dir, f"{str(global_index).zfill(6)}.txt.tmp")
             out_final = os.path.join(tmp_dir, f"{str(global_index).zfill(6)}.txt")
-            header = f"SOURCE {path} (start:{lo} end:{hi})\n"
+
+            # Single-line, nicely formatted header
+            header_line = (
+                f"[Chunk {local_index}/{total_in_file} | "
+                f"Source: {path} | "
+                f"chars:{lo}-{hi} | "
+                f"tokens:{tok}]\n"
+            )
+
             with open(out_tmp, "w", encoding="utf-8") as fw:
-                fw.write(header)
-                fw.write(text[lo:hi])
+                fw.write(header_line)
+                fw.write(content)
             os.replace(out_tmp, out_final)
-            tok = count_tokens(text[lo:hi])
-            print(f"Saved chunk {global_index} to '{out_final}' (from '{path}', Tokens: {tok})")
+
+            # Mirror the same clean summary in the console
+            print(
+                f"Saved {header_line.strip()} → '{out_final}'"
+            )
 
     # Atomically move tmp → final location
     os.replace(tmp_dir, chunks_dir)
-
+    
     print(f"--- All chunks saved successfully in the '{chunks_dir}/' directory. ---")
 
 
