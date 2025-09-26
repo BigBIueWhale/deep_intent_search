@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Grouped relevant-chunk printer with evidence injection (single --run argument).
+Grouped relevant-chunk printer with evidence injection (JSONL + strict validation).
 
-Behavior (HAPPY PATH ONLY):
-- Reads judgements from: ./search_runs/{RUN:04d}.txt (ASCII RS 0x1E delimited JSON records).
+Behavior (HAPPY PATH ONLY, no fallbacks):
+- Reads judgements from: ./search_runs/{RUN:04d}.jsonl (JSON Lines; one JSON object per line).
 - Uses ONLY this run to determine relevance and to source evidence.
 - Groups adjacent relevant chunk filenames by consecutive numeric indices.
 - For each adjacent group, prints to STDOUT in this order:
@@ -12,10 +12,9 @@ Behavior (HAPPY PATH ONLY):
     3) AFTER chunk (one after the last relevant in the group) with `"evidence": null`
 - The `"evidence"` line is inserted AFTER THE FIRST LINE of each printed chunk.
 - Chunk files are read from: ./split/chunks/<filename> using strict UTF-8.
-- Any deviation from the happy path raises a detailed, uncaught exception.
 
-Assumptions / Requirements:
-- The scan file exists and is RS (0x1E)–delimited JSON.
+Strict requirements (any deviation raises an uncaught exception with details):
+- The scan file exists and is newline-delimited JSON (JSONL).
 - Each relevant judgement has:
     - type == "judgement"
     - is_relevant == true
@@ -39,7 +38,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, TypedDict
 
-RS: str = "\x1e"
 SEARCH_RUNS_DIR: Path = Path("./search_runs")
 CHUNKS_DIR: Path = Path("./split/chunks")
 
@@ -69,13 +67,13 @@ class ParsedFilename:
 def parse_args(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="grouped_relevant_printer",
-        description="Print adjacent groups of relevant chunks with evidence injection (from a given search run).",
+        description="Print adjacent groups of relevant chunks with evidence injection (from a given JSONL run).",
     )
     parser.add_argument(
         "--run",
         type=int,
         required=True,
-        help="Run number to read from ./search_runs/{RUN:04d}.txt",
+        help="Run number to read from ./search_runs/{RUN:04d}.jsonl",
     )
     ns = parser.parse_args(argv)
     if ns.run < 0:
@@ -94,27 +92,29 @@ def read_text_strict(path: Path) -> str:
         )
 
 
-def iter_records_rs_json(path: Path) -> Iterable[JudgementRecord]:
+def iter_records_jsonl(path: Path) -> Iterable[JudgementRecord]:
+    """
+    Iterate JSONL (newline-delimited JSON objects). No fallbacks.
+    - Empty lines are not allowed.
+    - Each line must be a JSON object.
+    """
     data = read_text_strict(path)
-    if RS not in data:
-        raise ValueError(
-            f"Scan file {path!s} contains no ASCII RS (0x1E) delimiters; invalid format for this tool."
-        )
-    parts = [p for p in data.split(RS) if p.strip()]
-    if not parts:
-        raise ValueError(f"Scan file {path!s} yielded no JSON records after RS split.")
+    lines = data.splitlines()
+    if not lines:
+        raise ValueError(f"Scan file {path!s} is empty; expected JSONL records.")
 
-    for idx, raw in enumerate(parts, start=1):
+    for ln, line in enumerate(lines, start=1):
+        if not line.strip():
+            raise ValueError(f"Blank line at {path!s}:{ln}; JSONL must have one JSON object per non-empty line.")
         try:
-            obj = json.loads(raw)
+            obj = json.loads(line)
         except json.JSONDecodeError as e:
-            snippet = raw[:200].replace("\n", "\\n")
             raise ValueError(
-                f"JSON parse error in RS record #{idx} from {path!s}: {e.msg} at pos {e.pos}. "
-                f"Record starts with: {snippet!r}"
+                f"JSON parse error in {path!s}:{ln}: {e.msg} at pos {e.pos}. "
+                f"Line content starts with: {line[:160]!r}"
             )
         if not isinstance(obj, dict):
-            raise TypeError(f"Record #{idx} is not a JSON object in {path!s}.")
+            raise TypeError(f"Record at {path!s}:{ln} is not a JSON object.")
         yield obj  # type: ignore[return-value]
 
 
@@ -143,17 +143,17 @@ def build_relevant_and_evidence(scan_path: Path) -> Tuple[List[str], Dict[str, L
     Returns:
         ordered_relevant_filenames (dedup, first occurrence order),
         evidence_map (filename -> list of evidence strings from this run)
-    Enforces:
+    Enforces (no fallbacks):
         - type == "judgement"
         - is_relevant == True
         - filename conforms to expectations
-        - evidence key *present* for relevant judgements (string, non-empty)
+        - evidence key *present* and non-empty string for relevant judgements
     """
     seen: set[str] = set()
     ordered: List[str] = []
     evidence_map: Dict[str, List[str]] = {}
 
-    for i, rec in enumerate(iter_records_rs_json(scan_path), start=1):
+    for i, rec in enumerate(iter_records_jsonl(scan_path), start=1):
         rec_type = rec.get("type")
         if rec_type != "judgement":
             continue
@@ -242,8 +242,6 @@ def inject_evidence_line_after_header(content: str, evidence: Optional[str]) -> 
         "evidence": null
     """
     # Split only on first newline
-    header: str
-    rest: str
     if "\n" in content:
         idx = content.find("\n")
         header = content[:idx]
@@ -314,7 +312,7 @@ def print_group_to_stdout(group: List[str], evidence_map: Dict[str, List[str]]) 
 
 def main() -> None:
     run = parse_args()
-    scan_path = SEARCH_RUNS_DIR / f"{run:04d}.txt"
+    scan_path = SEARCH_RUNS_DIR / f"{run:04d}.jsonl"
     ordered_relevant, evidence_map = build_relevant_and_evidence(scan_path)
     groups = group_adjacent(ordered_relevant)
     if not groups:
