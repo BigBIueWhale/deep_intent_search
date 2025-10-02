@@ -9,12 +9,17 @@ This version matches the provided example format:
 
 Behavior (HAPPY PATH ONLY, no fallbacks):
 - Reads judgements from: ./search_runs/{RUN:04d}.jsonl (RS-delimited JSON records).
-- Uses ONLY this run to determine relevance and to source evidence.
+- Uses ONLY this run to determine which chunks are relevant and to source *positive* evidence for relevant chunks.
+- For NON-RELEVANT context chunks at the extremities (the BEFORE and AFTER around each relevant group),
+  this version REQUIREs there to be disqualifying "evidence" either in the current run or some previous run,
+  and injects the most recent such disqualifier into those context chunks.
 - Groups adjacent relevant chunk filenames by consecutive numeric indices.
 - For each adjacent group, prints to STDOUT in this order:
-    1) BEFORE chunk (one before the first relevant in the group) with `"evidence": null`
+    1) BEFORE chunk (one before the first relevant in the group) with
+       `"evidence": "<most recent disqualifier>"` and VERY CLEAR "context-only / NOT RELEVANT" labeling
     2) Every RELEVANT chunk in the group, each injected with `"evidence": "<from this run>"`
-    3) AFTER chunk (one after the last relevant in the group) with `"evidence": null`
+    3) AFTER chunk (one after the last relevant in the group) with
+       `"evidence": "<most recent disqualifier>"` and VERY CLEAR "context-only / NOT RELEVANT" labeling
 - The `"evidence"` line is inserted AFTER THE FIRST LINE of each printed chunk.
 - Chunk files are read from: ./split/chunks/<filename> using strict UTF-8.
 
@@ -26,6 +31,8 @@ Strict requirements (any deviation raises an uncaught exception with details):
     - filename == "<zero-padded integer>.txt" (e.g., "000483.txt")
     - evidence key present with a non-empty string value
 - Neighbor chunk files (BEFORE and AFTER) exist and are readable.
+- For each BEFORE/AFTER (non-relevant) neighbor, there MUST exist a most-recent (<= current run) disqualifying
+  judgement (is_relevant == false) with a non-empty 'evidence' string; the script injects that evidence.
 - All chunk files use UTF-8 encoding.
 
 CLI:
@@ -280,7 +287,47 @@ def join_unique(items: Sequence[str]) -> str:
     return " | ".join(out)
 
 
-def print_group_to_stdout(group: List[str], evidence_map: Dict[str, List[str]]) -> None:
+def find_most_recent_disqualifier(filename: str, inclusive_run: int) -> Tuple[int, str]:
+    """
+    Find the most recent run (<= inclusive_run) that contains a disqualifying judgement
+    for `filename`:
+        - type == "judgement"
+        - is_relevant == False
+        - evidence present and non-empty string
+    Returns (run_number, evidence_string).
+    Raises if no such disqualifier is found across 0..inclusive_run.
+    """
+    last_run: Optional[int] = None
+    last_ev: Optional[str] = None
+
+    for r in range(inclusive_run, -1, -1):
+        scan_path = SEARCH_RUNS_DIR / f"{r:04d}.jsonl"
+        if not scan_path.is_file():
+            continue
+        # Keep the last seen within this run (later records override earlier ones)
+        run_last_ev: Optional[str] = None
+        for rec in iter_records_rs_json(scan_path):
+            if rec.get("type") != "judgement":
+                continue
+            if rec.get("filename") != filename:
+                continue
+            if rec.get("is_relevant") is False:
+                ev = rec.get("evidence")
+                if isinstance(ev, str) and ev.strip():
+                    run_last_ev = ev.strip()
+        if run_last_ev:
+            last_run = r
+            last_ev = run_last_ev
+            break  # stop at the first (most recent) run that contains a valid disqualifier
+
+    if last_run is None or last_ev is None:
+        raise ValueError(
+            f"No disqualifying evidence found for non-relevant neighbor {filename!r} in runs 0..{inclusive_run:04d}."
+        )
+    return last_run, last_ev
+
+
+def print_group_to_stdout(group: List[str], evidence_map: Dict[str, List[str]], current_run: int) -> None:
     if not group:
         raise ValueError("Internal error: empty group encountered.")
 
@@ -297,10 +344,11 @@ def print_group_to_stdout(group: List[str], evidence_map: Dict[str, List[str]]) 
     sys.stdout.write(f"ADJACENT GROUP: {title}\n")
     sys.stdout.write(sep + "\n")
 
-    # BEFORE (must exist; evidence null)
+    # BEFORE (context-only / NOT RELEVANT) — must have a most-recent disqualifier
+    _, before_disq = find_most_recent_disqualifier(before_name, current_run)
     before_text = read_chunk_text_strict(before_name)
-    sys.stdout.write(f"\n--- BEFORE: {before_name} ---\n")
-    sys.stdout.write(inject_evidence_line_after_header(before_text, None) + "\n")
+    sys.stdout.write(f"\n--- CONTEXT (NOT RELEVANT): BEFORE: {before_name} ---\n")
+    sys.stdout.write(inject_evidence_line_after_header(before_text, before_disq) + "\n")
 
     # RELEVANT(S) — evidence required from this run
     for fn in group:
@@ -312,10 +360,11 @@ def print_group_to_stdout(group: List[str], evidence_map: Dict[str, List[str]]) 
         sys.stdout.write(f"\n*** RELEVANT: {fn} ***\n")
         sys.stdout.write(inject_evidence_line_after_header(chunk_text, ev_joined) + "\n")
 
-    # AFTER (must exist; evidence null)
+    # AFTER (context-only / NOT RELEVANT) — must have a most-recent disqualifier
+    _, after_disq = find_most_recent_disqualifier(after_name, current_run)
     after_text = read_chunk_text_strict(after_name)
-    sys.stdout.write(f"\n--- AFTER: {after_name} ---\n")
-    sys.stdout.write(inject_evidence_line_after_header(after_text, None) + "\n")
+    sys.stdout.write(f"\n--- CONTEXT (NOT RELEVANT): AFTER: {after_name} ---\n")
+    sys.stdout.write(inject_evidence_line_after_header(after_text, after_disq) + "\n")
 
     sys.stdout.write("\n")  # spacer between groups
 
@@ -328,7 +377,7 @@ def main() -> None:
     if not groups:
         raise ValueError("Internal error: no groups produced from relevant filenames.")
     for g in groups:
-        print_group_to_stdout(g, evidence_map)
+        print_group_to_stdout(g, evidence_map, run)
 
 
 if __name__ == "__main__":
