@@ -166,10 +166,15 @@ def build_items_from_run(run_path: str) -> Tuple[str, str, int, List[Item]]:
 # ---------- LLM comparator (with retries & thinking) ----------
 def compare_with_llm(query: str, A: Item, B: Item, client, max_retries: int = 5) -> Tuple[str, str]:
     """
-    Returns (winner, rationale) where winner in {"A","B","tie"}.
-    Includes SUMMARY and EVIDENCE for each, plus full TEXTs.
-    Retries with thinking enabled, tolerant to malformed outputs.
+    Returns (winner, rationale), where winner in {"A","B","tie"}.
+
+    - PROMPT ORDERING: asks for a concise rationale (evidence-first) and only then the winner.
+    - TIES: disallowed in normal operation. We only return "tie" if *all* retries fail
+      (e.g., model errors or persistently malformed outputs).
+    - Thinking is enabled for robustness (please_no_thinking=False).
+    - Summary & evidence are included alongside full section text for both A and B.
     """
+    # Build the ranking prompt: evidence/rationale first, then the forced verdict (A or B).
     prompt = f"""
 You are ranking two *already relevant* sections by which is **more relevant** to the user's deep intent.
 
@@ -192,27 +197,29 @@ EVIDENCE: {B.evidence}
 TEXT:
 \"\"\"{B.text}\"\"\"
 
+First, write a concise rationale comparing A vs B using decisive cues from their TEXT/SUMMARY/EVIDENCE
+(cite short key phrases when helpful). Then, **you must pick exactly one winner**. Ties are not allowed.
+
 Respond ONLY with JSON:
 {{
-  "winner": "A" | "B" | "tie",
-  "rationale": "<one dense paragraph>"
+  "rationale": "<one dense paragraph grounded in the two sections>",
+  "winner": "A" | "B"
 }}
 """.strip()
 
     messages = [
         {"role": "system", "content": "Return strictly valid JSON. No preface/suffix."},
-        {"role": "user", "content": prompt},
+        {"role": "user",   "content": prompt},
     ]
 
+    # If the client is missing, we cannot proceed with LLM comparisons.
+    # Be forgiving: return a tie only because we cannot even attempt model calls.
     if not client:
-        # Heuristic fallback: prefer denser evidence; tie-breaker by original_index.
-        a_key = (len(A.evidence), -A.original_index)
-        b_key = (len(B.evidence), -B.original_index)
-        if a_key == b_key:
-            return "tie", "LLM unavailable; heuristic tie."
-        return ("A" if a_key > b_key else "B"), "LLM unavailable; heuristic based on evidence length."
+        return "tie", "LLM client unavailable; unable to obtain a decision after 0/{} attempts.".format(max_retries)
 
-    last_err = None
+    last_err: Optional[Exception] = None
+
+    # Retry loop: be tolerant to LLM failures/malformed JSON.
     for attempt in range(1, max_retries + 1):
         try:
             resp = chat_complete(
@@ -220,28 +227,36 @@ Respond ONLY with JSON:
                 role="judge",
                 client=client,
                 max_completion_tokens=512,
-                # explicitly allow thinking (important for reliability)
+                # Thinking explicitly enabled for reliability
                 please_no_thinking=False,
                 require_json=True,
             )
             stats = print_stats(resp)
-            if stats: print(stats)
+            if stats:
+                print(stats)
+
             txt = resp.message.content
-            # Safe slice to outermost braces
+            # Extract outermost JSON object defensively
             start = txt.find("{")
-            end   = txt.rfind("}")
+            end = txt.rfind("}")
             if start == -1 or end == -1 or end <= start:
-                raise ValueError("Model output lacked a JSON object.")
-            obj = json.loads(txt[start:end+1])
-            w = obj.get("winner", "tie")
-            if w not in ("A", "B", "tie"):
-                w = "tie"
+                raise ValueError("Model output lacked a well-formed JSON object.")
+
+            obj = json.loads(txt[start : end + 1])
             rationale = (obj.get("rationale") or "").strip()
-            return w, rationale
+            winner = (obj.get("winner") or "").strip()
+
+            # Enforce "no ties" contract during normal operation.
+            if winner not in ("A", "B"):
+                raise ValueError(f"Model must choose 'A' or 'B' (no ties). Got: {winner!r}")
+
+            return winner, rationale
+
         except Exception as e:
             last_err = e
             print(f"  -> Warning (Attempt {attempt}/{max_retries}): {e}")
-    # All retries failed → be forgiving: tie with rationale.
+
+    # All retries failed → only here do we allow a 'tie' (forgiving behavior).
     return "tie", f"All {max_retries} attempts failed; recorded as tie. Last error: {last_err}"
 
 # ---------- Progress I/O (minimal) ----------
