@@ -13,6 +13,10 @@ Adaptive, deterministic tournament reranker (minimal-state).
     2) Then one {"type":"match","a":oiA,"b":oiB,"winner":"A|B|tie","rationale": "..."} per comparison.
 - Elo & counts live in memory and are recomputed by replaying the matches on resume.
 - Final order -> ./rerank/order.csv as a single CSV line (most→least relevant original indices).
+
+*** CHANGE: Final ordering is now computed by a path-independent Bradley–Terry
+maximum-likelihood fit over all recorded matches (ties count as 0.5 to each side).
+Elo is retained only for live scheduling. ***
 - No CLI args. Strict “happy-path” with detailed errors; forgiving to LLM failures (5 retries, thinking enabled).
 """
 
@@ -24,6 +28,7 @@ import glob
 import hashlib
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional
+from collections import defaultdict
 
 from dotenv import load_dotenv
 from core.llm import get_client, chat_complete, print_stats
@@ -40,6 +45,11 @@ BASE_ELO   = 1500.0
 K_SMALL    = 32.0     # n < 8
 K_DEFAULT  = 24.0     # n >= 8
 PAIR_REPEAT_SOFT_CAP = 1  # avoid same H2H unless needed
+
+# Bradley–Terry (final ranking) knobs
+BT_ITERS          = 50        # MM iterations (fast; hundreds of items is fine)
+BT_REG_LAMBDA     = 1e-3      # tiny symmetric pseudo-count to avoid degeneracy / disconnection
+BT_MIN_MATCHES_BT = 1         # if total matches < this, fall back to Elo order
 
 # ---------- Data ----------
 @dataclass(frozen=True)
@@ -416,6 +426,102 @@ def stop_condition(state: State) -> bool:
         return True
     return False
 
+# ---------- Bradley–Terry fitting (final ranking) ----------
+def _build_bt_counts(rows: List[dict]) -> Tuple[Dict[int, Dict[int, float]], Dict[int, Dict[int, float]], int]:
+    """
+    Build pairwise win counts W[i][j] (i defeats j) and totals N[i][j] from progress rows.
+    Ties contribute 0.5 to each side. Returns (W, N, total_matches_counted).
+    """
+    W: Dict[int, Dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    N: Dict[int, Dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    total = 0
+    for r in rows[1:]:
+        if r.get("type") != "match":
+            continue
+        a = int(r["a"])
+        b = int(r["b"])
+        w = r.get("winner", "tie")
+        if w == "A":
+            W[a][b] += 1.0
+        elif w == "B":
+            W[b][a] += 1.0
+        else:
+            # tie -> split as 0.5 / 0.5
+            W[a][b] += 0.5
+            W[b][a] += 0.5
+        N[a][b] += 1.0
+        N[b][a] += 1.0
+        total += 1
+    return W, N, total
+
+def _fit_bradley_terry(item_ids: List[int],
+                       W: Dict[int, Dict[int, float]],
+                       N: Dict[int, Dict[int, float]],
+                       iters: int = BT_ITERS,
+                       reg_lambda: float = BT_REG_LAMBDA) -> Dict[int, float]:
+    """
+    Minorization–Maximization (MM) solver for Bradley–Terry on a connected (or lightly regularized) graph.
+    We maintain positive abilities w_i; final score is theta_i = log w_i.
+
+    Update:
+        w_i <- ( sum_j W_ij_reg ) / ( sum_j N_ij_reg / (w_i + w_j) )
+
+    where symmetric regularization is:
+        W_ij_reg = W_ij + reg_lambda
+        N_ij_reg = N_ij + 2*reg_lambda
+
+    This tiny prior prevents infinite separations and handles sparse/disconnected match graphs gracefully.
+    """
+    # initialize positive abilities
+    w: Dict[int, float] = {oi: 1.0 for oi in item_ids}
+
+    # precompute opponent lists for speed
+    opps: Dict[int, List[int]] = {i: list({j for j in set(W[i].keys()) | set(N[i].keys()) if j != i}) for i in item_ids}
+    # also ensure everyone considers everyone, so regularization applies even to unseen pairs
+    all_set = set(item_ids)
+    for i in item_ids:
+        # include at least some opponents for denominator regularization
+        if not opps[i]:
+            opps[i] = [j for j in item_ids if j != i]
+
+    for _ in range(max(1, iters)):
+        # one MM sweep
+        new_w: Dict[int, float] = {}
+        for i in item_ids:
+            num = 0.0
+            den = 0.0
+            for j in opps[i]:
+                Wij = W[i].get(j, 0.0) + reg_lambda
+                Nij = N[i].get(j, 0.0) + 2.0 * reg_lambda
+                num += Wij
+                den += Nij / (w[i] + w[j])
+            # Avoid zero division; if den==0 (degenerate), keep previous w[i]
+            if den > 0.0:
+                new_w[i] = max(1e-12, num / den)
+            else:
+                new_w[i] = w[i]
+        # normalize to stabilize (geometric mean = 1)
+        # Compute log mean
+        gm = math.exp(sum(math.log(val) for val in new_w.values()) / len(new_w))
+        for i in item_ids:
+            w[i] = new_w[i] / gm
+
+    # Convert to log-abilities
+    theta = {i: math.log(max(1e-12, w[i])) for i in item_ids}
+    return theta
+
+def _bt_order_from_progress(rows: List[dict], item_ids: List[int]) -> Optional[List[int]]:
+    """
+    Compute BT thetas from all matches in progress and return item_ids sorted by theta desc.
+    Returns None if not enough matches to be meaningful.
+    """
+    W, N, total = _build_bt_counts(rows)
+    if total < BT_MIN_MATCHES_BT:
+        return None
+    theta = _fit_bradley_terry(item_ids, W, N, iters=BT_ITERS, reg_lambda=BT_REG_LAMBDA)
+    ordered = sorted(item_ids, key=lambda oi: (-theta.get(oi, 0.0), oi))
+    return ordered
+
 # ---------- Output ----------
 def print_progress(state: State) -> None:
     done = state.total_matches
@@ -423,11 +529,33 @@ def print_progress(state: State) -> None:
     pct  = min(100.0, 100.0 * done / est)
     print(f"Progress: {done}/{est} (~{pct:.1f}%)")
 
-def write_order_csv(state: State) -> None:
-    ordered = sorted([it.original_index for it in state.items], key=lambda oi: (-state.ratings[oi], oi))
+def write_order_csv(state: State, rows: Optional[List[dict]] = None) -> None:
+    """
+    Final order is produced by a path-independent Bradley–Terry fit over all recorded matches.
+    If there are no/too-few matches, fall back to the current Elo snapshot (deterministic).
+    """
+    item_ids = [it.original_index for it in state.items]
+    ordered_bt: Optional[List[int]] = None
+
+    if rows is None:
+        rows = read_progress_lines()
+
+    try:
+        ordered_bt = _bt_order_from_progress(rows, item_ids)
+    except Exception as e:
+        print(f"Warning: BT ranking failed with error: {e}. Falling back to Elo order.")
+
+    if ordered_bt is None:
+        # Fallback: sort by Elo desc (stable tie by original index)
+        ordered = sorted(item_ids, key=lambda oi: (-state.ratings[oi], oi))
+        with open(ORDER_PATH, "w", encoding="utf-8") as f:
+            f.write(",".join(map(str, ordered)) + "\n")
+        print(f"\nWrote ranking via Elo fallback ({len(ordered)} items) to {ORDER_PATH}")
+        return
+
     with open(ORDER_PATH, "w", encoding="utf-8") as f:
-        f.write(",".join(map(str, ordered)) + "\n")
-    print(f"\nWrote ranking ({len(ordered)} items) to {ORDER_PATH}")
+        f.write(",".join(map(str, ordered_bt)) + "\n")
+    print(f"\nWrote ranking (Bradley–Terry, {len(ordered_bt)} items) to {ORDER_PATH}")
 
 # ---------- Main ----------
 def main() -> None:
@@ -488,8 +616,8 @@ def main() -> None:
         print(f"Compared {A.filename} (oi={oi_a}) vs {B.filename} (oi={oi_b}) → {winner.upper()}")
         print_progress(state)
 
-    # Final ordering
-    write_order_csv(state)
+    # Final ordering (Bradley–Terry over all matches; Elo only used for scheduling)
+    write_order_csv(state, rows=rows)
 
 if __name__ == "__main__":
     main()
