@@ -18,17 +18,50 @@ Adaptive, deterministic tournament reranker (minimal-state).
 maximum-likelihood fit over all recorded matches (ties count as 0.5 to each side).
 Elo is retained only for live scheduling. If BT cannot be produced, the tool
 falls back to Elo and prints an explicit reason for the fallback. ***
-- No CLI args. Strict “happy-path” with detailed errors; forgiving to LLM failures (5 retries, thinking enabled).
+
+---------------------------------------------------------------------
+*** REWRITE: Swiss + tiny Top-K playoff (no Elo/BT; single-vote matches) ***
+
+- Keep file structure, paths, and progress.jsonl journaling.
+- Replace algorithm with:
+  (1) Deterministic Swiss for R rounds (R = ceil(log2 n) + 1).
+  (2) Deterministic early stop if top-K stabilizes (K=8), else after R rounds.
+  (3) Tiny Top-K playoff: complete missing head-to-heads among top-K (single vote).
+  (4) Final ranking from pairwise wins using Copeland + schedule tie-breakers.
+- LLM verdicts are **single vote** per series. Ties from the LLM are **not allowed**; on judge failure
+  after retries, choose a deterministic fallback winner (seeded hash).
+- New REQUIRED CLI argument: --query "free-form user query".
+  The free-form query replaces reading the query from search-run metadata and is
+  persisted into progress.jsonl meta to guarantee deterministic resume.
+
+Additional log records:
+- We preserve `type:"match"` lines and include:
+    "stage": "swiss"|"playoff",
+    "round": <int>,
+    "series": {"k":1,"wins_A":0|1,"wins_B":0|1}
+- For rare odd-n Swiss rounds, we emit a synthetic bye record:
+    {"type":"bye","stage":"swiss","round":r,"a":oiA}
+  A bye counts as +0.5 score for that item, affects Buchholz accordingly.
+
+*** Printing / Progress ***
+- After every series, print a one-line verdict including filenames, oi, and the winner.
+- Maintain and print an estimated progress percentage:
+    Progress: {done}/{est} (~{pct:.1f}%)
+  where 'done' counts recorded series (matches), and 'est' is a fixed upper-bound
+  estimate: R*floor(n/2) + K*(K-1)/2.
+---------------------------------------------------------------------
 """
 
 from __future__ import annotations
 import os
+import sys
 import json
 import math
 import glob
 import hashlib
+import argparse
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 from collections import defaultdict
 
 from dotenv import load_dotenv
@@ -42,15 +75,9 @@ RERANK_DIR     = "./rerank"
 PROGRESS_PATH  = os.path.join(RERANK_DIR, "progress.jsonl")
 ORDER_PATH     = os.path.join(RERANK_DIR, "order.csv")
 
-BASE_ELO   = 1500.0
-K_SMALL    = 32.0     # n < 8
-K_DEFAULT  = 24.0     # n >= 8
-PAIR_REPEAT_SOFT_CAP = 1  # avoid same H2H unless needed
-
-# Bradley–Terry (final ranking) knobs
-BT_ITERS          = 50        # MM iterations (fast; hundreds of items is fine)
-BT_REG_LAMBDA     = 1e-3      # tiny symmetric pseudo-count to avoid degeneracy / disconnection
-BT_MIN_MATCHES_BT = 1         # if total matches < this, BT will raise with a clear reason
+# ---------- Swiss/Playoff knobs ----------
+SWISS_TOP_K                     = 8
+SWISS_MIN_ROUNDS_FOR_STABILITY  = 5
 
 # ---------- Data ----------
 @dataclass(frozen=True)
@@ -69,13 +96,17 @@ class State:
     query: str
     seed_base: int
     items: List[Item]                         # canonical (sorted by original_index)
-    ratings: Dict[int, float]                 # oi -> Elo
-    matches_played: Dict[int, int]            # oi -> count
-    h2h: Dict[Tuple[int,int], int]            # (min_oi,max_oi) -> count
-    total_matches: int
-    elo_k: float
-    budget_per_item: int
-    est_total_matches: int
+    # pairwise results (for final scoring)
+    wins: Dict[int, Dict[int, int]]          # wins[i][j] = # of series wins for i over j
+    losses: Dict[int, Dict[int, int]]        # losses[i][j] = # series losses for i vs j
+    meets: Dict[Tuple[int,int], int]         # number of series between i and j (stage-agnostic)
+    # swiss standings (recomputed on replay)
+    score: Dict[int, float]                  # W=1, L=0; bye=0.5
+    opps: Dict[int, List[int]]               # opponents list (for Buchholz)
+    swiss_round: int                         # current round (1-indexed)
+    swiss_done: bool
+    playoff_done: bool
+    total_series: int                        # number of recorded series (matches)
 
 # ---------- Helpers ----------
 def ensure_dirs() -> None:
@@ -110,22 +141,6 @@ def read_chunk_text(filename: str) -> str:
     with open(p, "r", encoding="utf-8") as f:
         return f.read()
 
-def matches_budget_per_item(n: int) -> int:
-    if n <= 1: return 0
-    if n == 2: return 1
-    return int(math.ceil(1.7 * math.log2(n))) + 2
-
-def estimated_total_matches(n: int, per_item: int) -> int:
-    return int(math.ceil(n * per_item / 2))
-
-def expected_score(r_a: float, r_b: float) -> float:
-    return 1.0 / (1.0 + 10.0 ** ((r_b - r_a) / 400.0))
-
-def update_elo(r_a: float, r_b: float, score_a: float, k: float) -> Tuple[float,float]:
-    ea = expected_score(r_a, r_b)
-    eb = 1.0 - ea
-    return r_a + k * (score_a - ea), r_b + k * ((1.0 - score_a) - eb)
-
 def derive_seed_base(run_file: str, query: str, pass_number: int, item_ids: List[int]) -> int:
     # internal deterministic seed (not stored). hash usage here is fine (not a stored fingerprint).
     h = hashlib.sha256()
@@ -136,11 +151,19 @@ def derive_seed_base(run_file: str, query: str, pass_number: int, item_ids: List
     h.update(str(pass_number).encode("utf-8"))
     h.update(b"|")
     h.update(",".join(map(str, item_ids)).encode("utf-8"))
-    return int.from_bytes(h.digest()[:8], "big", signed=False)
+    return int.from_bytes(h.digest()[8:16], "big", signed=False)  # slight offset to differ from older seeds
 
 def det_ab_flip(seed_base: int, match_index: int, oi_a: int, oi_b: int) -> bool:
     s = f"{seed_base}|{match_index}|{min(oi_a,oi_b)}|{max(oi_a,oi_b)}"
     return (hashlib.sha256(s.encode("utf-8")).digest()[0] & 1) == 1
+
+def det_fallback_winner(seed_base: int, series_index: int, oi_a: int, oi_b: int) -> str:
+    """
+    Deterministic fallback winner when the LLM cannot produce a valid decision.
+    Returns "A" or "B" based solely on a seeded hash; never "tie".
+    """
+    s = f"fallback|{seed_base}|{series_index}|{min(oi_a,oi_b)}|{max(oi_a,oi_b)}"
+    return "A" if (hashlib.sha256(s.encode("utf-8")).digest()[0] & 1) == 0 else "B"
 
 # ---------- Build candidate set ----------
 def build_items_from_run(run_path: str) -> Tuple[str, str, int, List[Item]]:
@@ -148,9 +171,6 @@ def build_items_from_run(run_path: str) -> Tuple[str, str, int, List[Item]]:
     meta = recs[0]
     if meta.get("type") != "meta":
         raise RuntimeError("First RS record in run file must be 'meta'.")
-    query = meta.get("query", "")
-    if not isinstance(query, str) or not query:
-        raise RuntimeError("Run meta is missing a non-empty 'query'.")
     run_created_at = meta.get("created_at") or meta.get("created") or meta.get("createdAt")
     if not isinstance(run_created_at, str) or not run_created_at:
         raise RuntimeError("Run meta is missing 'created_at' (string).")
@@ -174,18 +194,12 @@ def build_items_from_run(run_path: str) -> Tuple[str, str, int, List[Item]]:
     items.sort(key=lambda x: x.original_index)
     return os.path.basename(run_path), run_created_at, pass_number, items
 
-# ---------- LLM comparator (with retries & thinking) ----------
-def compare_with_llm(query: str, A: Item, B: Item, client, max_retries: int = 5) -> Tuple[str, str]:
+# ---------- LLM comparator (single vote; no ties) ----------
+def compare_with_llm(query: str, A: Item, B: Item, client, max_retries: int, seed_base: int, series_index: int) -> Tuple[str, str]:
     """
-    Returns (winner, rationale), where winner in {"A","B","tie"}.
-
-    - PROMPT ORDERING: asks for a concise rationale (evidence-first) and only then the winner.
-    - TIES: disallowed in normal operation. We only return "tie" if *all* retries fail
-      (e.g., model errors or persistently malformed outputs).
-    - Thinking is enabled for robustness (please_no_thinking=False).
-    - Summary & evidence are included alongside full section text for both A and B.
+    Returns (winner, rationale), where winner in {"A","B"} ONLY.
+    If the client is missing or all retries fail, we return a deterministic fallback winner.
     """
-    # Build the ranking prompt: evidence/rationale first, then the forced verdict (A or B).
     prompt = f"""
 You are ranking two *already relevant* sections by which is **more relevant** to the user's deep intent.
 
@@ -219,18 +233,15 @@ Respond ONLY with JSON:
 """.strip()
 
     messages = [
-        {"role": "system", "content": "Return strictly valid JSON. No preface/suffix."},
+        {"role": "system", "content": "Return strictly valid JSON. No preface/suffix. No ties allowed."},
         {"role": "user",   "content": prompt},
     ]
 
-    # If the client is missing, we cannot proceed with LLM comparisons.
-    # Be forgiving: return a tie only because we cannot even attempt model calls.
     if not client:
-        return "tie", "LLM client unavailable; unable to obtain a decision after 0/{} attempts.".format(max_retries)
+        # Deterministic fallback (never 'tie')
+        return det_fallback_winner(seed_base, series_index, 0, 1), "LLM client unavailable; deterministic fallback winner."
 
     last_err: Optional[Exception] = None
-
-    # Retry loop: be tolerant to LLM failures/malformed JSON.
     for attempt in range(1, max_retries + 1):
         try:
             resp = chat_complete(
@@ -238,7 +249,6 @@ Respond ONLY with JSON:
                 role="judge",
                 client=client,
                 max_completion_tokens=512,
-                # Thinking explicitly enabled for reliability
                 please_no_thinking=False,
                 require_json=True,
             )
@@ -247,7 +257,6 @@ Respond ONLY with JSON:
                 print(stats)
 
             txt = resp.message.content
-            # Extract outermost JSON object defensively
             start = txt.find("{")
             end = txt.rfind("}")
             if start == -1 or end == -1 or end <= start:
@@ -256,21 +265,18 @@ Respond ONLY with JSON:
             obj = json.loads(txt[start : end + 1])
             rationale = (obj.get("rationale") or "").strip()
             winner = (obj.get("winner") or "").strip()
-
-            # Enforce "no ties" contract during normal operation.
             if winner not in ("A", "B"):
                 raise ValueError(f"Model must choose 'A' or 'B' (no ties). Got: {winner!r}")
-
             return winner, rationale
-
         except Exception as e:
             last_err = e
             print(f"  -> Warning (Attempt {attempt}/{max_retries}): {e}")
 
-    # All retries failed → only here do we allow a 'tie' (forgiving behavior).
-    return "tie", f"All {max_retries} attempts failed; recorded as tie. Last error: {last_err}"
+    # Deterministic fallback if all retries failed
+    fallback = det_fallback_winner(seed_base, series_index, 0, 1)
+    return fallback, f"All {max_retries} attempts failed; deterministic fallback winner selected: {fallback}. Last error: {last_err}"
 
-# ---------- Progress I/O (minimal) ----------
+# ---------- Progress I/O ----------
 def write_progress_line(obj: dict) -> None:
     with open(PROGRESS_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps(obj, ensure_ascii=False))
@@ -315,7 +321,6 @@ def ensure_meta_first_line(expected_meta: dict) -> List[dict]:
     exp_ids = expected_meta.get("item_ids", [])
     got_ids = first.get("item_ids", [])
     if exp_ids != got_ids:
-        # Build a small diff summary
         exp_set = set(exp_ids)
         got_set = set(got_ids)
         missing = sorted(exp_set - got_set)[:10]
@@ -326,21 +331,22 @@ def ensure_meta_first_line(expected_meta: dict) -> List[dict]:
             + (f"; extra first few: {extra}" if extra else "")
         )
 
+    # Algorithm identity must match for deterministic resume
+    if first.get("algo") != expected_meta.get("algo"):
+        mismatches.append(f"- algo: expected {expected_meta.get('algo')!r}, found {first.get('algo')!r}")
+
     if mismatches:
         raise RuntimeError(
-            "progress.jsonl meta does not match the newest deep-search run:\n" +
+            "progress.jsonl meta does not match the current configuration:\n" +
             "\n".join(mismatches) +
-            "\n\nIf you intentionally changed the run, delete ./rerank/progress.jsonl and rerun."
+            "\n\nIf you intentionally changed the run or query, delete ./rerank/progress.jsonl and rerun."
         )
     return rows
 
-# ---------- State init & replay ----------
+# ---------- Replay ----------
 def fresh_state(run_file: str, run_created_at: str, pass_number: int, query: str, items: List[Item]) -> State:
     item_ids = [it.original_index for it in items]
     seed_base = derive_seed_base(run_file, query, pass_number, item_ids)
-    elo_k = K_DEFAULT if len(items) >= 8 else K_SMALL
-    budget = matches_budget_per_item(len(items))
-    est_total = estimated_total_matches(len(items), budget)
     return State(
         run_file=run_file,
         run_created_at=run_created_at,
@@ -348,220 +354,336 @@ def fresh_state(run_file: str, run_created_at: str, pass_number: int, query: str
         query=query,
         seed_base=seed_base,
         items=items,
-        ratings={oi: BASE_ELO for oi in item_ids},
-        matches_played={oi: 0 for oi in item_ids},
-        h2h={},
-        total_matches=0,
-        elo_k=elo_k,
-        budget_per_item=budget,
-        est_total_matches=est_total,
+        wins=defaultdict(lambda: defaultdict(int)),
+        losses=defaultdict(lambda: defaultdict(int)),
+        meets=defaultdict(int),
+        score={oi: 0.0 for oi in item_ids},
+        opps={oi: [] for oi in item_ids},
+        swiss_round=0,
+        swiss_done=False,
+        playoff_done=False,
+        total_series=0,
     )
 
-def apply_match(state: State, oi_a: int, oi_b: int, winner: str) -> None:
-    score_a = 1.0 if winner == "A" else 0.0 if winner == "B" else 0.5
-    rA = state.ratings[oi_a]
-    rB = state.ratings[oi_b]
-    newA, newB = update_elo(rA, rB, score_a, state.elo_k)
-    state.ratings[oi_a] = newA
-    state.ratings[oi_b] = newB
-    state.matches_played[oi_a] += 1
-    state.matches_played[oi_b] += 1
-    k = (oi_a, oi_b) if oi_a < oi_b else (oi_b, oi_a)
-    state.h2h[k] = state.h2h.get(k, 0) + 1
-    state.total_matches += 1
+def record_series_result(state: State, oi_a: int, oi_b: int, winner: str) -> None:
+    # update meets (use undirected key)
+    key = (oi_a, oi_b) if oi_a < oi_b else (oi_b, oi_a)
+    state.meets[key] = state.meets.get(key, 0) + 1
 
-def replay_matches(state: State, rows: List[dict]) -> None:
+    if winner == "A":
+        state.wins[oi_a][oi_b] += 1
+        state.losses[oi_b][oi_a] += 1
+        state.score[oi_a] += 1.0
+        state.opps[oi_a].append(oi_b)
+        state.opps[oi_b].append(oi_a)
+    elif winner == "B":
+        state.wins[oi_b][oi_a] += 1
+        state.losses[oi_a][oi_b] += 1
+        state.score[oi_b] += 1.0
+        state.opps[oi_a].append(oi_b)
+        state.opps[oi_b].append(oi_a)
+    else:
+        raise RuntimeError("Invalid winner in record_series_result. Only 'A' or 'B' allowed.")
+    state.total_series += 1
+
+def record_bye(state: State, oi_a: int) -> None:
+    state.score[oi_a] += 0.5
+    # no change to opponents
+    # total_series does not include byes
+
+def replay_rows(state: State, rows: List[dict]) -> None:
+    # reset standings
+    for oi in [it.original_index for it in state.items]:
+        state.score[oi] = 0.0
+        state.opps[oi] = []
+    state.wins.clear()
+    state.losses.clear()
+    state.meets.clear()
+    state.swiss_round = 0
+    state.swiss_done = False
+    state.playoff_done = False
+    state.total_series = 0
+
+    # ingest rows
     for r in rows[1:]:
-        if r.get("type") != "match":
+        t = r.get("type")
+        if t == "match":
+            oi_a = int(r["a"])
+            oi_b = int(r["b"])
+            winner = r.get("winner")
+            if winner not in ("A","B"):
+                # Historical "tie": treat as score 0.5 each; do not increment total_series
+                state.score[oi_a] += 0.5
+                state.score[oi_b] += 0.5
+                state.opps[oi_a].append(oi_b)
+                state.opps[oi_b].append(oi_a)
+                key = (oi_a, oi_b) if oi_a < oi_b else (oi_b, oi_a)
+                state.meets[key] = state.meets.get(key, 0) + 1
+                continue
+            record_series_result(state, oi_a, oi_b, winner)
+            if r.get("stage") == "swiss":
+                state.swiss_round = max(state.swiss_round, int(r.get("round", 0)))
+        elif t == "bye":
+            record_bye(state, int(r["a"]))
+            if r.get("stage") == "swiss":
+                state.swiss_round = max(state.swiss_round, int(r.get("round", 0)))
+        elif t == "meta":
             continue
-        oi_a = int(r["a"])
-        oi_b = int(r["b"])
-        winner = r.get("winner", "tie")
-        apply_match(state, oi_a, oi_b, winner)
-
-# ---------- Scheduler (adaptive, deterministic) ----------
-def choose_next_pair(state: State) -> Optional[Tuple[int,int]]:
-    """
-    Pick next (oi_a, oi_b) deterministically from current state:
-      - Anchor: fewest matches; tie-break by Elo then original_index
-      - Opponent: minimize (|E-0.5|, repeats penalty, opp matches, |Δmatches|, |Δelo|, oi)
-    """
-    items = state.items
-    if len(items) < 2:
-        return None
-
-    mp = state.matches_played
-    r  = state.ratings
-    h2h = state.h2h
-
-    anchor = sorted(items, key=lambda it: (mp[it.original_index], r[it.original_index], it.original_index))[0]
-    i  = anchor.original_index
-    ri = r[i]
-    mi = mp[i]
-
-    best = None  # ((score_tuple), j)
-    for opp in items:
-        j = opp.original_index
-        if j == i: continue
-        rj = r[j]
-        mj = mp[j]
-        key = (i, j) if i < j else (j, i)
-        repeats = h2h.get(key, 0)
-
-        closeness   = abs(expected_score(ri, rj) - 0.5)
-        rep_penalty = 0 if repeats <= PAIR_REPEAT_SOFT_CAP else (repeats - PAIR_REPEAT_SOFT_CAP)
-        score = (closeness, rep_penalty, mj, abs(mi - mj), abs(ri - rj), j)
-        cand  = (score, j)
-        if best is None or cand[0] < best[0]:
-            best = cand
-
-    if not best:
-        return None
-    return (i, best[1])
-
-def stop_condition(state: State) -> bool:
-    n = len(state.items)
-    if n <= 1: return True
-    if n == 2 and state.total_matches >= 1: return True
-    if all(state.matches_played[it.original_index] >= state.budget_per_item for it in state.items):
-        return True
-    return False
-
-# ---------- Bradley–Terry fitting (final ranking) ----------
-def _build_bt_counts(rows: List[dict]) -> Tuple[Dict[int, Dict[int, float]], Dict[int, Dict[int, float]], int]:
-    """
-    Build pairwise win counts W[i][j] (i defeats j) and totals N[i][j] from progress rows.
-    Ties contribute 0.5 to each side. Returns (W, N, total_matches_counted).
-    """
-    W: Dict[int, Dict[int, float]] = defaultdict(lambda: defaultdict(float))
-    N: Dict[int, Dict[int, float]] = defaultdict(lambda: defaultdict(float))
-    total = 0
-    for r in rows[1:]:
-        if r.get("type") != "match":
-            continue
-        a = int(r["a"])
-        b = int(r["b"])
-        w = r.get("winner", "tie")
-        if w == "A":
-            W[a][b] += 1.0
-        elif w == "B":
-            W[b][a] += 1.0
         else:
-            # tie -> split as 0.5 / 0.5
-            W[a][b] += 0.5
-            W[b][a] += 0.5
-        N[a][b] += 1.0
-        N[b][a] += 1.0
-        total += 1
-    return W, N, total
+            continue
 
-def _fit_bradley_terry(item_ids: List[int],
-                       W: Dict[int, Dict[int, float]],
-                       N: Dict[int, Dict[int, float]],
-                       iters: int = BT_ITERS,
-                       reg_lambda: float = BT_REG_LAMBDA) -> Dict[int, float]:
-    """
-    Minorization–Maximization (MM) solver for Bradley–Terry on a connected (or lightly regularized) graph.
-    We maintain positive abilities w_i; final score is theta_i = log w_i.
+# ---------- Standings utilities ----------
+def buchholz(state: State, oi: int) -> float:
+    return sum(state.score[opp] for opp in state.opps.get(oi, []))
 
-    Update:
-        w_i <- ( sum_j W_ij_reg ) / ( sum_j N_ij_reg / (w_i + w_j) )
+def median_buchholz(state: State, oi: int) -> float:
+    opp_scores = [state.score[opp] for opp in state.opps.get(oi, [])]
+    if len(opp_scores) <= 2:
+        return sum(opp_scores)
+    opp_scores.sort()
+    return sum(opp_scores[1:-1])
 
-    where symmetric regularization is:
-        W_ij_reg = W_ij + reg_lambda
-        N_ij_reg = N_ij + 2*reg_lambda
+def has_met(state: State, i: int, j: int) -> int:
+    if i == j: return 0
+    key = (i, j) if i < j else (j, i)
+    return state.meets.get(key, 0)
 
-    This tiny prior prevents infinite separations and handles sparse/disconnected match graphs gracefully.
-    """
-    # initialize positive abilities
-    w: Dict[int, float] = {oi: 1.0 for oi in item_ids}
+def swiss_rounds_budget(n: int) -> int:
+    return int(math.ceil(math.log2(max(2, n)))) + 1
 
-    # precompute opponent lists for speed
-    opps: Dict[int, List[int]] = {i: list({j for j in set(W[i].keys()) | set(N[i].keys()) if j != i}) for i in item_ids}
-    # also ensure everyone considers everyone, so regularization applies even to unseen pairs
-    for i in item_ids:
-        if not opps[i]:
-            opps[i] = [j for j in item_ids if j != i]
+def sort_key(state: State, oi: int) -> Tuple:
+    return (-state.score[oi], -buchholz(state, oi), -median_buchholz(state, oi), oi)
 
-    for _ in range(max(1, iters)):
-        # one MM sweep
-        new_w: Dict[int, float] = {}
-        for i in item_ids:
-            num = 0.0
-            den = 0.0
-            for j in opps[i]:
-                Wij = W[i].get(j, 0.0) + reg_lambda
-                Nij = N[i].get(j, 0.0) + 2.0 * reg_lambda
-                num += Wij
-                den += Nij / (w[i] + w[j])
-            if den > 0.0:
-                new_w[i] = max(1e-12, num / den)
-            else:
-                new_w[i] = w[i]
-        # normalize to stabilize (geometric mean = 1)
-        gm = math.exp(sum(math.log(val) for val in new_w.values()) / len(new_w))
-        for i in item_ids:
-            w[i] = new_w[i] / gm
+def current_topK(state: State, K: int) -> List[int]:
+    ids = [it.original_index for it in state.items]
+    ids.sort(key=lambda oi: sort_key(state, oi))
+    return ids[:K]
 
-    theta = {i: math.log(max(1e-12, w[i])) for i in item_ids}
-    return theta
+# ---------- Progress printing ----------
+def estimated_total_series(n: int, R: int, K: int) -> int:
+    # Upper-bound estimate: R * floor(n/2) Swiss series + full K round-robin
+    return R * (n // 2) + (K * (K - 1)) // 2
 
-def _bt_order_from_progress(rows: List[dict], item_ids: List[int]) -> List[int]:
-    """
-    Compute BT thetas from all matches in progress and return item_ids sorted by theta desc.
-    Raises RuntimeError with a clear reason if BT cannot be produced.
-    """
-    W, N, total = _build_bt_counts(rows)
-    if total < BT_MIN_MATCHES_BT:
-        raise RuntimeError(
-            f"Bradley–Terry not computed: only {total} match(es) recorded "
-            f"(minimum required: {BT_MIN_MATCHES_BT})."
-        )
-    theta = _fit_bradley_terry(item_ids, W, N, iters=BT_ITERS, reg_lambda=BT_REG_LAMBDA)
-    if not theta or any((not math.isfinite(v)) for v in theta.values()):
-        raise RuntimeError("Bradley–Terry not computed: solver produced invalid parameters.")
-    ordered = sorted(item_ids, key=lambda oi: (-theta.get(oi, 0.0), oi))
-    if not ordered:
-        raise RuntimeError("Bradley–Terry not computed: empty ranking after fit.")
-    return ordered
-
-# ---------- Output ----------
-def print_progress(state: State) -> None:
-    done = state.total_matches
-    est  = max(state.est_total_matches, 1)
+def print_progress(state: State, est_total: int) -> None:
+    done = max(0, state.total_series)
+    est  = max(1, est_total)
     pct  = min(100.0, 100.0 * done / est)
     print(f"Progress: {done}/{est} (~{pct:.1f}%)")
 
-def write_order_csv(state: State, rows: Optional[List[dict]] = None) -> None:
+# ---------- Pairing (deterministic Swiss) ----------
+def swiss_pairings(state: State, round_index: int) -> Tuple[List[Tuple[int,int]], Optional[int]]:
     """
-    Final order is produced by a path-independent Bradley–Terry fit over all recorded matches.
-    If BT cannot be produced, we print a precise reason and then fall back to Elo
-    so that an order is still emitted for downstream steps.
+    Return:
+      - list of tuples (oi_i, oi_j) for this round (single vote per match)
+      - optional bye item oi (or None)
+    Deterministic:
+      - Sort by (-score, -buchholz, -median_buchholz, oi).
+      - Group by same score band; pair adjacent within band, skipping prior H2H if possible.
+      - If unavoidable, allow a rematch (at most once overall per pair due to sorting evolution).
     """
-    item_ids = [it.original_index for it in state.items]
-    if rows is None:
-        rows = read_progress_lines()
+    ids = [it.original_index for it in state.items]
+    ids.sort(key=lambda oi: sort_key(state, oi))
 
-    try:
-        ordered_bt = _bt_order_from_progress(rows, item_ids)
-        with open(ORDER_PATH, "w", encoding="utf-8") as f:
-            f.write(",".join(map(str, ordered_bt)) + "\n")
-        print(f"\nWrote ranking (Bradley–Terry, {len(ordered_bt)} items) to {ORDER_PATH}")
-        return
-    except Exception as e:
-        reason = str(e).strip() or e.__class__.__name__
-        # Fall back to Elo *with an explicit explanation*
-        ordered_elo = sorted(item_ids, key=lambda oi: (-state.ratings[oi], oi))
-        with open(ORDER_PATH, "w", encoding="utf-8") as f:
-            f.write(",".join(map(str, ordered_elo)) + "\n")
-        print("\n[BT → Elo Fallback]")
-        print(f"Reason: {reason}")
-        print(f"Wrote ranking via Elo fallback ({len(ordered_elo)} items) to {ORDER_PATH}")
+    # Build bands by equal score
+    bands: List[List[int]] = []
+    cur_band: List[int] = []
+    last_score: Optional[float] = None
+    for oi in ids:
+        s = state.score[oi]
+        if last_score is None or s == last_score:
+            cur_band.append(oi)
+            last_score = s
+        else:
+            bands.append(cur_band)
+            cur_band = [oi]
+            last_score = s
+    if cur_band:
+        bands.append(cur_band)
+
+    pairings: List[Tuple[int,int]] = []
+    byes: List[int] = []
+
+    for band in bands:
+        used: Set[int] = set()
+        i = 0
+        L = len(band)
+        while i < L:
+            if band[i] in used:
+                i += 1
+                continue
+            oi_i = band[i]
+            # Find opponent in-band, prefer nearest right neighbor without prior H2H
+            opponent = None
+            step = 1
+            while i + step < L:
+                cand = band[i + step]
+                if cand in used:
+                    step += 1
+                    continue
+                met = has_met(state, oi_i, cand)
+                if met == 0:
+                    opponent = cand
+                    break
+                step += 1
+            if opponent is None:
+                # fall back to next available (rematch allowed)
+                j = i + 1
+                while j < L and band[j] in used:
+                    j += 1
+                if j < L:
+                    opponent = band[j]
+
+            if opponent is not None:
+                used.add(oi_i)
+                used.add(opponent)
+                pairings.append((oi_i, opponent))
+            i += 1
+
+        leftovers = [x for x in band if x not in used]
+        byes.extend(leftovers)
+
+    # If global count is odd, we must produce exactly one bye; otherwise try to pair leftovers cross-bands deterministically
+    all_ids = [it.original_index for it in state.items]
+    if len(all_ids) % 2 == 1:
+        # choose last leftover in final band as bye deterministically
+        bye = byes[-1] if byes else ids[-1]
+        byes_set = set([bye])
+    else:
+        byes_set = set()
+
+    # Cross-band greedy pairing for remaining leftovers (excluding any bye)
+    leftovers = [x for x in byes if x not in byes_set]
+    leftovers.sort()  # deterministic
+    while len(leftovers) >= 2:
+        a = leftovers.pop(0)
+        b = leftovers.pop(0)
+        pairings.append((a, b))
+
+    bye_item = next(iter(byes_set)) if byes_set else None
+    # Ensure pairings are in deterministic order
+    pairings.sort(key=lambda t: (min(t[0], t[1]), max(t[0], t[1])))
+    return pairings, bye_item
+
+def swiss_stop_condition(state: State, R: int, K: int, prev_topk: Optional[List[int]]) -> Tuple[bool, Optional[List[int]]]:
+    """
+    Stop Swiss if:
+      A) rounds played == R
+      B) round >= SWISS_MIN_ROUNDS_FOR_STABILITY and top-K set identical to previous round
+         and no score-tie crosses boundary (i.e., the tuple sort_key differs at K/K+1)
+    Returns (stop, current_topk)
+    """
+    ids_sorted = [it.original_index for it in state.items]
+    ids_sorted.sort(key=lambda oi: sort_key(state, oi))
+    topk = ids_sorted[:K]
+    if state.swiss_round >= R:
+        return True, topk
+    if state.swiss_round >= SWISS_MIN_ROUNDS_FOR_STABILITY and prev_topk is not None:
+        if topk == prev_topk:
+            if len(ids_sorted) > K:
+                if sort_key(state, ids_sorted[K-1]) > sort_key(state, ids_sorted[K]):
+                    return True, topk
+            else:
+                return True, topk
+    return False, topk
+
+# ---------- Match execution ----------
+def run_series_and_log(state: State, round_index: int, stage: str, oi_a: int, oi_b: int, client, est_total: int) -> None:
+    """
+    Run a single-vote series (k=1), log a match line, update state, and print verdict + progress.
+    """
+    A = next(it for it in state.items if it.original_index == oi_a)
+    B = next(it for it in state.items if it.original_index == oi_b)
+
+    base_index = len(read_progress_lines())  # used only to stabilize A/B flip seeds
+    flip = det_ab_flip(state.seed_base, base_index, oi_a, oi_b)
+    AA, BB = (B, A) if flip else (A, B)
+    winner, rationale = compare_with_llm(state.query, AA, BB, client, max_retries=5, seed_base=state.seed_base, series_index=base_index)
+    if flip:
+        winner = {"A": "B", "B": "A"}[winner]
+
+    record_series_result(state, oi_a, oi_b, winner)
+    write_progress_line({
+        "type": "match",
+        "stage": stage,
+        "round": round_index if stage == "swiss" else None,
+        "a": oi_a,
+        "b": oi_b,
+        "winner": winner,
+        "rationale": rationale,
+        "series": {"k": 1, "wins_A": 1 if winner == "A" else 0, "wins_B": 1 if winner == "B" else 0}
+    })
+
+    # ---- Print verdict line and progress ----
+    fn_a = A.filename
+    fn_b = B.filename
+    print(f"Compared {fn_a} (oi={oi_a}) vs {fn_b} (oi={oi_b}) → {winner.upper()}")
+    print_progress(state, est_total)
+
+def log_bye(state: State, round_index: int, oi_a: int, est_total: int) -> None:
+    record_bye(state, oi_a)
+    write_progress_line({
+        "type": "bye",
+        "stage": "swiss",
+        "round": round_index,
+        "a": oi_a
+    })
+    print(f"Round {round_index}: BYE → oi={oi_a} (+0.5 score)")
+    print_progress(state, est_total)
+
+# ---------- Final ranking ----------
+def copeland_score(state: State, oi: int) -> float:
+    opp_ids = [it.original_index for it in state.items if it.original_index != oi]
+    wins = sum(1.0 for j in opp_ids if state.wins[oi].get(j, 0) > state.losses[oi].get(j, 0))
+    return wins  # no LLM ties recorded
+
+def head_to_head(state: State, a: int, b: int) -> int:
+    wa = state.wins[a].get(b, 0)
+    wb = state.wins[b].get(a, 0)
+    if wa > wb: return -1  # a ahead
+    if wb > wa: return 1   # b ahead
+    return 0
+
+def final_order(state: State) -> List[int]:
+    ids = [it.original_index for it in state.items]
+    def key(oi: int):
+        return (
+            -copeland_score(state, oi),
+            -state.score[oi],
+            -buchholz(state, oi),
+            -median_buchholz(state, oi),
+            oi
+        )
+    ids.sort(key=key)
+    # break remaining ties pairwise using head-to-head where applicable (stable)
+    i = 0
+    while i < len(ids) - 1:
+        a, b = ids[i], ids[i+1]
+        if key(a) == key(b):
+            h2h = head_to_head(state, a, b)
+            if h2h > 0:  # b ahead
+                ids[i], ids[i+1] = ids[i+1], ids[i]
+        i += 1
+    return ids
+
+def write_order_csv(state: State) -> None:
+    ordered = final_order(state)
+    with open(ORDER_PATH, "w", encoding="utf-8") as f:
+        f.write(",".join(map(str, ordered)) + "\n")
+    print(f"\nWrote ranking (Swiss+TopK, {len(ordered)} items) to {ORDER_PATH}")
 
 # ---------- Main ----------
 def main() -> None:
     load_dotenv()
-    client = get_client()  # may be None; that's okay (heuristic fallback)
+
+    # --- CLI: require --query ---
+    parser = argparse.ArgumentParser(description="Deterministic Swiss + Top-K playoff reranker (single-vote matches)")
+    parser.add_argument("--query", type=str, required=True, help="Free-form user query that explains what's important")
+    args = parser.parse_args()
+    user_query = (args.query or "").strip()
+    if not user_query:
+        raise SystemExit("ERROR: --query must be a non-empty string.")
+
+    client = get_client()  # may be None; we fall back deterministically
 
     ensure_dirs()
     run_path = newest_run_file(SEARCH_RUNS_DIR)
@@ -569,57 +691,82 @@ def main() -> None:
 
     run_file2, run_created_at, pass_number, items = build_items_from_run(run_path)
     if run_file2 != run_file:
-        # Shouldn't happen, but be explicit if it does.
         raise RuntimeError(f"Internal mismatch: resolved run file {run_file!r} vs parsed {run_file2!r}")
 
     item_ids = [it.original_index for it in items]
+    seed_base = derive_seed_base(run_file, user_query, pass_number, item_ids)
+    R = swiss_rounds_budget(len(items))
+
     expected_meta = {
         "type": "meta",
         "run_file": run_file,
         "run_created_at": run_created_at,
         "pass_number": pass_number,
-        "query": items and (items[0] and items[0]) and None  # placeholder to keep keys visible below
+        "query": user_query,
+        "item_ids": item_ids,
+        "algo": "swiss+topk",
+        "params": {
+            "rounds": R,
+            "k_top": SWISS_TOP_K,
+            "series_k": 1
+        }
     }
-    # NOTE: query lives in the run meta; fetch it explicitly (not via items)
-    recs = read_rs_json(run_path)
-    expected_meta["query"] = recs[0].get("query", "")
-    expected_meta["item_ids"] = item_ids
 
     rows = ensure_meta_first_line(expected_meta)
 
-    # Build fresh in-memory state and replay prior matches
-    state = fresh_state(run_file, run_created_at, pass_number, expected_meta["query"], items)
-    replay_matches(state, rows)
-    if state.total_matches:
+    # Build in-memory state and replay prior matches/byes
+    state = fresh_state(run_file, run_created_at, pass_number, user_query, items)
+    replay_rows(state, rows)
+
+    # Print resume info + initial progress estimate
+    est_total = estimated_total_series(n=len(items), R=R, K=SWISS_TOP_K)
+    if state.total_series:
         print("Resumed from progress.jsonl.")
-        print_progress(state)
+    print_progress(state, est_total)
 
-    # Adaptive loop
-    while not stop_condition(state):
-        pair = choose_next_pair(state)
-        if not pair:
-            break
-        oi_a, oi_b = pair
-        A = next(it for it in state.items if it.original_index == oi_a)
-        B = next(it for it in state.items if it.original_index == oi_b)
+    # --- Swiss phase ---
+    prev_topk: Optional[List[int]] = None
+    stop, prev_topk = swiss_stop_condition(state, R, SWISS_TOP_K, None)
+    while not stop:
+        round_index = state.swiss_round + 1
+        pairings, bye_item = swiss_pairings(state, round_index)
 
-        # deterministic A/B flip only
-        flip = det_ab_flip(state.seed_base, state.total_matches, oi_a, oi_b)
-        AA, BB = (B, A) if flip else (A, B)
+        for (a, b) in pairings:
+            run_series_and_log(state, round_index, "swiss", a, b, client, est_total)
 
-        winner, rationale = compare_with_llm(state.query, AA, BB, client, max_retries=5)
-        if flip:
-            winner = {"A": "B", "B": "A", "tie": "tie"}[winner]
+        if bye_item is not None:
+            log_bye(state, round_index, bye_item, est_total)
 
-        apply_match(state, oi_a, oi_b, winner)
-        write_progress_line({"type": "match", "a": oi_a, "b": oi_b, "winner": winner, "rationale": rationale})
+        state.swiss_round = round_index
+        stop, curr_topk = swiss_stop_condition(state, R, SWISS_TOP_K, prev_topk)
+        prev_topk = curr_topk
 
-        print(f"Compared {A.filename} (oi={oi_a}) vs {B.filename} (oi={oi_b}) → {winner.upper()}")
-        print_progress(state)
+    state.swiss_done = True
 
-    # Final ordering (Bradley–Terry over all matches; Elo only used for scheduling)
-    # IMPORTANT: re-read fresh progress so we don't pass a stale snapshot.
-    write_order_csv(state)  # re-reads progress.jsonl internally
+    # --- Top-K playoff: complete missing pairs among top-K (single vote) ---
+    topk = current_topK(state, SWISS_TOP_K)
+    missing_pairs: List[Tuple[int,int]] = []
+    for i in range(len(topk)):
+        for j in range(i+1, len(topk)):
+            a, b = topk[i], topk[j]
+            if has_met(state, a, b) == 0:
+                missing_pairs.append((a, b))
+    # Deterministic order
+    missing_pairs.sort(key=lambda t: (t[0], t[1]))
+
+    for (a, b) in missing_pairs:
+        run_series_and_log(state, 0, "playoff", a, b, client, est_total)
+
+    state.playoff_done = True
+
+    # --- Final order ---
+    write_order_csv(state)
+    # Final progress print
+    print_progress(state, est_total)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+        sys.exit(130)
