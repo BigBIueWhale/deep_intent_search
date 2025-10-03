@@ -5,47 +5,62 @@ Grouped relevant-chunk printer with evidence injection (RS-delimited records).
 This version matches the provided example format:
 - The scan file is a single text file containing multiple JSON objects,
   delimited by ASCII Record Separator (0x1E, '\x1e') between records.
-- It is addressed as: ./search_runs/{RUN:04d}.jsonl  (extension is not relied upon, format is).
+- It is addressed as: the *newest* file under ./search_runs (strictly of the form {RUN:04d}.jsonl).
 
-Behavior (HAPPY PATH ONLY, no fallbacks):
-- Reads judgements from: ./search_runs/{RUN:04d}.jsonl (RS-delimited JSON records).
+Behavior (STRICT HAPPY PATH, no silent fallbacks):
+- Automatically selects the newest RS-delimited run in ./search_runs (filename: {RUN:04d}.jsonl).
 - Uses ONLY this run to determine which chunks are relevant and to source *positive* evidence for relevant chunks.
 - For NON-RELEVANT context chunks at the extremities (the BEFORE and AFTER around each relevant group),
   this version REQUIREs there to be disqualifying "evidence" either in the current run or some previous run,
   and injects the most recent such disqualifier into those context chunks.
+- **Boundary edge case**: If a BEFORE/AFTER neighbor is out-of-bounds (e.g., negative index) or the neighbor
+  chunk file does not exist (beginning/end of corpus), that context block is **omitted** without error.
+  When a neighbor file *does* exist, absence of disqualifying evidence is treated as a hard error.
 - Groups adjacent relevant chunk filenames by consecutive numeric indices.
+- Ordering changes:
+    * Determine *all* groups first, then order groups by the best (highest-ranked) member
+      according to ./rerank/order.csv (rank 1 = best).
+    * Within each group, order relevant filenames by their rank in ./rerank/order.csv (not by filename).
+    * For each relevant section, inject a `"result_rank": <N>` line at the beginning of its metadata.
 - For each adjacent group, prints to STDOUT in this order:
     1) BEFORE chunk (one before the first relevant in the group) with
        `"evidence": "<most recent disqualifier>"` and VERY CLEAR "context-only / NOT RELEVANT" labeling
-    2) Every RELEVANT chunk in the group, each injected with `"evidence": "<from this run>"`
+       (skipped if boundary).
+    2) Every RELEVANT chunk in the group (ordered by rank), each injected with:
+           "result_rank": <N>
+           "evidence":    "<from this run>"
     3) AFTER chunk (one after the last relevant in the group) with
        `"evidence": "<most recent disqualifier>"` and VERY CLEAR "context-only / NOT RELEVANT" labeling
-- The `"evidence"` line is inserted AFTER THE FIRST LINE of each printed chunk.
+       (skipped if boundary)
+- The evidence (and rank for relevant) lines are inserted AFTER THE FIRST LINE of each printed chunk.
 - Chunk files are read from: ./split/chunks/<filename> using strict UTF-8.
 
 Strict requirements (any deviation raises an uncaught exception with details):
-- The scan file exists and is RS (0x1E)–delimited JSON (no JSONL line mode).
-- Each relevant judgement has:
+- ./search_runs exists and contains at least one RS-delimited run named {RUN:04d}.jsonl.
+- The newest run's first record is meta with a non-empty query string (consistency).
+- ./rerank/order.csv exists and is a single CSV line of integers (original indices), unique.
+- Each relevant judgement in the newest run has:
     - type == "judgement"
     - is_relevant == true
     - filename == "<zero-padded integer>.txt" (e.g., "000483.txt")
     - evidence key present with a non-empty string value
-- Neighbor chunk files (BEFORE and AFTER) exist and are readable.
-- For each BEFORE/AFTER (non-relevant) neighbor, there MUST exist a most-recent (<= current run) disqualifying
-  judgement (is_relevant == false) with a non-empty 'evidence' string; the script injects that evidence.
+- Each relevant filename's numeric index must appear in order.csv.
+- Neighbor chunk files (BEFORE and AFTER) that **exist** must be readable, and must have a most-recent
+  (<= current run) disqualifying judgement with non-empty evidence. If they do **not exist** due to boundary,
+  the context block is omitted.
 - All chunk files use UTF-8 encoding.
 
 CLI:
-    python script.py --run 2
+    (none) — always uses newest run found under ./search_runs
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import re
 import sys
+import glob
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, TypedDict
@@ -53,7 +68,10 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple, TypedDict
 RS: str = "\x1e"
 SEARCH_RUNS_DIR: Path = Path("./search_runs")
 CHUNKS_DIR: Path = Path("./split/chunks")
+RERANK_DIR: Path = Path("./rerank")
+ORDER_CSV_PATH: Path = RERANK_DIR / "order.csv"
 
+RUN_FILE_RE: re.Pattern[str] = re.compile(r"^(?P<run>\d{4})\.jsonl$")
 FILENAME_RE: re.Pattern[str] = re.compile(r"^(?P<num>\d+)\.txt$")
 
 
@@ -77,21 +95,27 @@ class ParsedFilename:
         return f"{self.stem}{num:0{self.width}d}{self.ext}"
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="grouped_relevant_printer",
-        description="Print adjacent groups of relevant chunks with evidence injection (from an RS-delimited run).",
-    )
-    parser.add_argument(
-        "--run",
-        type=int,
-        required=True,
-        help="Run number to read from ./search_runs/{RUN:04d}.jsonl (RS-delimited records).",
-    )
-    ns = parser.parse_args(argv)
-    if ns.run < 0:
-        raise ValueError(f"--run must be a non-negative integer, got: {ns.run}")
-    return int(ns.run)
+# ---------- Strict FS + parsing helpers ----------
+
+def newest_run_file() -> Tuple[int, Path]:
+    if not SEARCH_RUNS_DIR.is_dir():
+        raise FileNotFoundError(f"Missing directory: {SEARCH_RUNS_DIR!s}")
+    files = sorted(glob.glob(str(SEARCH_RUNS_DIR / "*.jsonl")))
+    if not files:
+        raise FileNotFoundError(f"No run files found under {SEARCH_RUNS_DIR!s}")
+    # Enforce naming pattern {RUN:04d}.jsonl and pick the highest RUN
+    candidates: List[Tuple[int, Path]] = []
+    for f in files:
+        name = os.path.basename(f)
+        m = RUN_FILE_RE.match(name)
+        if not m:
+            raise ValueError(f"Run filename does not match required pattern ####.jsonl: {name!r}")
+        run_num = int(m.group("run"))
+        candidates.append((run_num, Path(f)))
+    if not candidates:
+        raise FileNotFoundError(f"No properly named run files (####.jsonl) found in {SEARCH_RUNS_DIR!s}")
+    candidates.sort(key=lambda x: x[0])
+    return candidates[-1]
 
 
 def read_text_strict(path: Path) -> str:
@@ -155,24 +179,57 @@ def parse_filename_strict(filename: str) -> ParsedFilename:
     return ParsedFilename(stem="", num=int(num_str), width=len(num_str), ext=ext)
 
 
+def read_order_csv_strict(path: Path) -> List[int]:
+    if not path.is_file():
+        raise FileNotFoundError(f"Missing order CSV: {path!s}")
+    content = read_text_strict(path).strip()
+    if not content:
+        raise ValueError(f"Empty order CSV: {path!s}")
+    # Expect a single CSV line of integers
+    if "\n" in content.strip():
+        raise ValueError(f"order.csv must be a single line of comma-separated integers: {path!s}")
+    parts = [p.strip() for p in content.split(",") if p.strip() != ""]
+    try:
+        nums = [int(p) for p in parts]
+    except ValueError as e:
+        raise ValueError(f"order.csv contains non-integer tokens at {path!s}: {e}")
+    if len(nums) != len(set(nums)):
+        raise ValueError(f"order.csv contains duplicate indices at {path!s}")
+    return nums
+
+
+# ---------- Domain logic ----------
+
 def build_relevant_and_evidence(scan_path: Path) -> Tuple[List[str], Dict[str, List[str]]]:
     """
     Returns:
         ordered_relevant_filenames (dedup, first occurrence order),
         evidence_map (filename -> list of evidence strings from this run)
     Enforces:
+        - first RS record is meta with a non-empty 'query' (consistency check)
         - type == "judgement"
         - is_relevant == True
         - filename conforms to expectations
         - evidence key *present* and non-empty string for relevant judgements
     """
+    rec_iter = list(iter_records_rs_json(scan_path))
+    if not rec_iter:
+        raise ValueError(f"No RS records parsed from {scan_path!s}")
+
+    # meta consistency check
+    meta = rec_iter[0]
+    if meta.get("type") != "meta":
+        raise ValueError(f"First RS record must be 'meta' in {scan_path!s}")
+    q = meta.get("query")
+    if not isinstance(q, str) or not q.strip():
+        raise ValueError(f"Meta record 'query' must be a non-empty string in {scan_path!s}")
+
     seen: set[str] = set()
     ordered: List[str] = []
     evidence_map: Dict[str, List[str]] = {}
 
-    for i, rec in enumerate(iter_records_rs_json(scan_path), start=1):
-        rec_type = rec.get("type")
-        if rec_type != "judgement":
+    for i, rec in enumerate(rec_iter[1:], start=2):
+        if rec.get("type") != "judgement":
             continue
 
         fn = rec.get("filename")
@@ -211,7 +268,7 @@ def group_adjacent(filenames: Sequence[str]) -> List[List[str]]:
         pf = parse_filename_strict(fn)
         enriched.append((pf, fn))
 
-    # Sort by (stem, ext, width, num) to group consistently
+    # Sort by (stem, ext, width, num) to group consistently *when forming groups only*
     enriched.sort(key=lambda x: (x[0].stem, x[0].ext, x[0].width, x[0].num))
 
     groups: List[List[str]] = []
@@ -251,14 +308,11 @@ def read_chunk_text_strict(filename: str) -> str:
         )
 
 
-def inject_evidence_line_after_header(content: str, evidence: Optional[str]) -> str:
+def inject_lines_after_header(content: str, injected_lines: List[str]) -> str:
     """
-    Insert a line right AFTER the first line of `content`:
-        "evidence": "<escaped>"
-    or
-        "evidence": null
+    Insert the provided lines RIGHT AFTER the first line of `content`.
+    Each element of `injected_lines` is included as-is (one per new line).
     """
-    # Split only on first newline
     if "\n" in content:
         idx = content.find("\n")
         header = content[:idx]
@@ -266,15 +320,14 @@ def inject_evidence_line_after_header(content: str, evidence: Optional[str]) -> 
     else:
         header = content
         rest = ""
+    body = header + "\n" + "\n".join(injected_lines)
+    if rest:
+        body += "\n" + rest
+    return body
 
-    if evidence is None:
-        ev_line = '"evidence": null'
-    else:
-        # Single-line JSON-style escaping
-        safe = evidence.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
-        ev_line = f'"evidence": "{safe}"'
 
-    return header + "\n" + ev_line + ("\n" + rest if rest else "")
+def json_escape_one_line(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
 
 def join_unique(items: Sequence[str]) -> str:
@@ -304,7 +357,6 @@ def find_most_recent_disqualifier(filename: str, inclusive_run: int) -> Tuple[in
         scan_path = SEARCH_RUNS_DIR / f"{r:04d}.jsonl"
         if not scan_path.is_file():
             continue
-        # Keep the last seen within this run (later records override earlier ones)
         run_last_ev: Optional[str] = None
         for rec in iter_records_rs_json(scan_path):
             if rec.get("type") != "judgement":
@@ -318,7 +370,7 @@ def find_most_recent_disqualifier(filename: str, inclusive_run: int) -> Tuple[in
         if run_last_ev:
             last_run = r
             last_ev = run_last_ev
-            break  # stop at the first (most recent) run that contains a valid disqualifier
+            break
 
     if last_run is None or last_ev is None:
         raise ValueError(
@@ -327,15 +379,31 @@ def find_most_recent_disqualifier(filename: str, inclusive_run: int) -> Tuple[in
     return last_run, last_ev
 
 
-def print_group_to_stdout(group: List[str], evidence_map: Dict[str, List[str]], current_run: int) -> None:
+# ---------- Printing (deferred until *after* all ordering is computed) ----------
+
+def print_group_to_stdout(group: List[str],
+                          evidence_map: Dict[str, List[str]],
+                          current_run: int,
+                          rank_of: Dict[str, int]) -> None:
+    """
+    Print one adjacent group:
+      - BEFORE context (most recent disqualifier) — omitted if boundary (neighbor missing/out-of-bounds)
+      - RELEVANT files (ordered by rank_in_csv asc), with "result_rank" + "evidence"
+      - AFTER  context (most recent disqualifier) — omitted if boundary (neighbor missing/out-of-bounds)
+    """
     if not group:
         raise ValueError("Internal error: empty group encountered.")
 
+    # Determine neighbors using filename adjacency (strict)
     first_pf = parse_filename_strict(group[0])
     last_pf = parse_filename_strict(group[-1])
 
-    before_name = first_pf.format(first_pf.num - 1)
-    after_name = last_pf.format(last_pf.num + 1)
+    # Compute neighbor names; if before would be negative, treat as boundary (omit)
+    before_name: Optional[str] = None
+    if first_pf.num - 1 >= 0:
+        before_name = first_pf.format(first_pf.num - 1)
+
+    after_name: Optional[str] = last_pf.format(last_pf.num + 1)  # may or may not exist as a file
 
     # Title
     title = f"{group[0]} .. {group[-1]}" if len(group) > 1 else group[0]
@@ -344,40 +412,107 @@ def print_group_to_stdout(group: List[str], evidence_map: Dict[str, List[str]], 
     sys.stdout.write(f"ADJACENT GROUP: {title}\n")
     sys.stdout.write(sep + "\n")
 
-    # BEFORE (context-only / NOT RELEVANT) — must have a most-recent disqualifier
-    _, before_disq = find_most_recent_disqualifier(before_name, current_run)
-    before_text = read_chunk_text_strict(before_name)
-    sys.stdout.write(f"\n--- CONTEXT (NOT RELEVANT): BEFORE: {before_name} ---\n")
-    sys.stdout.write(inject_evidence_line_after_header(before_text, before_disq) + "\n")
+    # BEFORE (context-only / NOT RELEVANT): only if neighbor chunk file exists
+    if before_name is not None:
+        before_path = CHUNKS_DIR / before_name
+        if before_path.is_file():
+            _, before_disq = find_most_recent_disqualifier(before_name, current_run)
+            before_text = read_chunk_text_strict(before_name)
+            sys.stdout.write(f"\n--- CONTEXT (NOT RELEVANT): BEFORE: {before_name} ---\n")
+            sys.stdout.write(inject_lines_after_header(
+                before_text,
+                [f"\"evidence\": \"{json_escape_one_line(before_disq)}\""]
+            ) + "\n")
+        else:
+            # Boundary at the beginning: omit BEFORE
+            pass
 
-    # RELEVANT(S) — evidence required from this run
+    # RELEVANT(S) — order by rank per order.csv, inject result_rank and evidence
+    # Validate all members have ranks
     for fn in group:
-        ev_items = evidence_map.get(fn)
-        if not ev_items:
-            raise KeyError(f"Relevant file {fn!r} missing required evidence entries in this run.")
-        ev_joined = join_unique(ev_items)
+        if fn not in rank_of:
+            raise KeyError(f"Relevant file {fn!r} not present in order.csv mapping.")
+
+    group_sorted = sorted(group, key=lambda fn: rank_of[fn])
+
+    for fn in group_sorted:
+        evidences = evidence_map.get(fn)
+        if not evidences:
+            raise KeyError(f"Relevant file {fn!r} missing required evidence entries in newest run.")
+        ev_joined = join_unique(evidences)
         chunk_text = read_chunk_text_strict(fn)
         sys.stdout.write(f"\n*** RELEVANT: {fn} ***\n")
-        sys.stdout.write(inject_evidence_line_after_header(chunk_text, ev_joined) + "\n")
+        sys.stdout.write(inject_lines_after_header(
+            chunk_text,
+            [
+                f"\"result_rank\": {rank_of[fn]}",
+                f"\"evidence\": \"{json_escape_one_line(ev_joined)}\"",
+            ]
+        ) + "\n")
 
-    # AFTER (context-only / NOT RELEVANT) — must have a most-recent disqualifier
-    _, after_disq = find_most_recent_disqualifier(after_name, current_run)
-    after_text = read_chunk_text_strict(after_name)
-    sys.stdout.write(f"\n--- CONTEXT (NOT RELEVANT): AFTER: {after_name} ---\n")
-    sys.stdout.write(inject_evidence_line_after_header(after_text, after_disq) + "\n")
+    # AFTER (context-only / NOT RELEVANT): only if neighbor chunk file exists
+    if after_name is not None:
+        after_path = CHUNKS_DIR / after_name
+        if after_path.is_file():
+            _, after_disq = find_most_recent_disqualifier(after_name, current_run)
+            after_text = read_chunk_text_strict(after_name)
+            sys.stdout.write(f"\n--- CONTEXT (NOT RELEVANT): AFTER: {after_name} ---\n")
+            sys.stdout.write(inject_lines_after_header(
+                after_text,
+                [f"\"evidence\": \"{json_escape_one_line(after_disq)}\""]
+            ) + "\n")
+        else:
+            # Boundary at the end: omit AFTER
+            pass
 
     sys.stdout.write("\n")  # spacer between groups
 
 
+# ---------- Main ----------
+
 def main() -> None:
-    run = parse_args()
-    scan_path = SEARCH_RUNS_DIR / f"{run:04d}.jsonl"
-    ordered_relevant, evidence_map = build_relevant_and_evidence(scan_path)
-    groups = group_adjacent(ordered_relevant)
+    # 1) Resolve newest run (strict naming ####.jsonl) and basic sanity checks
+    run_num, scan_path = newest_run_file()
+
+    # 2) Parse newest run; collect relevant filenames + their positive evidence (strict)
+    relevant_files, evidence_map = build_relevant_and_evidence(scan_path)
+
+    # 3) Read order.csv and build mapping from original_index -> rank (1-based)
+    order_indices = read_order_csv_strict(ORDER_CSV_PATH)
+    index_to_rank: Dict[int, int] = {idx: (i + 1) for i, idx in enumerate(order_indices)}
+
+    # 4) Build groups of adjacent relevant files (by numeric adjacency)
+    groups = group_adjacent(relevant_files)
     if not groups:
         raise ValueError("Internal error: no groups produced from relevant filenames.")
-    for g in groups:
-        print_group_to_stdout(g, evidence_map, run)
+
+    # 5) BEFORE any printing, build filename -> rank mapping and fully determine print order
+    filename_rank: Dict[str, int] = {}
+    for fn in relevant_files:
+        pf = parse_filename_strict(fn)
+        idx = pf.num
+        if idx not in index_to_rank:
+            raise KeyError(
+                f"Original index {idx} (from {fn!r}) not present in {ORDER_CSV_PATH!s}. "
+                "The rerank/order.csv must include all relevant items."
+            )
+        filename_rank[fn] = index_to_rank[idx]
+
+    # 6) Order each group’s members by rank ascending (best first)
+    groups_sorted_members: List[List[str]] = [
+        sorted(g, key=lambda name: filename_rank[name]) for g in groups
+    ]
+
+    # 7) Order the groups themselves by the best (minimum) rank among their members
+    group_keys: List[Tuple[int, int]] = []  # (min_rank_in_group, original_position) for stability
+    for pos, g in enumerate(groups_sorted_members):
+        min_rank = min(filename_rank[name] for name in g)
+        group_keys.append((min_rank, pos))
+    order_of_groups = [groups_sorted_members[pos] for _, pos in sorted(group_keys, key=lambda t: (t[0], t[1]))]
+
+    # 8) Now that *all* ordering is determined, perform the printing with strict neighbor evidence checks
+    for g in order_of_groups:
+        print_group_to_stdout(g, evidence_map, run_num, filename_rank)
 
 
 if __name__ == "__main__":
