@@ -16,7 +16,8 @@ Adaptive, deterministic tournament reranker (minimal-state).
 
 *** CHANGE: Final ordering is now computed by a path-independent Bradley–Terry
 maximum-likelihood fit over all recorded matches (ties count as 0.5 to each side).
-Elo is retained only for live scheduling. ***
+Elo is retained only for live scheduling. If BT cannot be produced, the tool
+falls back to Elo and prints an explicit reason for the fallback. ***
 - No CLI args. Strict “happy-path” with detailed errors; forgiving to LLM failures (5 retries, thinking enabled).
 """
 
@@ -49,7 +50,7 @@ PAIR_REPEAT_SOFT_CAP = 1  # avoid same H2H unless needed
 # Bradley–Terry (final ranking) knobs
 BT_ITERS          = 50        # MM iterations (fast; hundreds of items is fine)
 BT_REG_LAMBDA     = 1e-3      # tiny symmetric pseudo-count to avoid degeneracy / disconnection
-BT_MIN_MATCHES_BT = 1         # if total matches < this, fall back to Elo order
+BT_MIN_MATCHES_BT = 1         # if total matches < this, BT will raise with a clear reason
 
 # ---------- Data ----------
 @dataclass(frozen=True)
@@ -478,9 +479,7 @@ def _fit_bradley_terry(item_ids: List[int],
     # precompute opponent lists for speed
     opps: Dict[int, List[int]] = {i: list({j for j in set(W[i].keys()) | set(N[i].keys()) if j != i}) for i in item_ids}
     # also ensure everyone considers everyone, so regularization applies even to unseen pairs
-    all_set = set(item_ids)
     for i in item_ids:
-        # include at least some opponents for denominator regularization
         if not opps[i]:
             opps[i] = [j for j in item_ids if j != i]
 
@@ -495,31 +494,35 @@ def _fit_bradley_terry(item_ids: List[int],
                 Nij = N[i].get(j, 0.0) + 2.0 * reg_lambda
                 num += Wij
                 den += Nij / (w[i] + w[j])
-            # Avoid zero division; if den==0 (degenerate), keep previous w[i]
             if den > 0.0:
                 new_w[i] = max(1e-12, num / den)
             else:
                 new_w[i] = w[i]
         # normalize to stabilize (geometric mean = 1)
-        # Compute log mean
         gm = math.exp(sum(math.log(val) for val in new_w.values()) / len(new_w))
         for i in item_ids:
             w[i] = new_w[i] / gm
 
-    # Convert to log-abilities
     theta = {i: math.log(max(1e-12, w[i])) for i in item_ids}
     return theta
 
-def _bt_order_from_progress(rows: List[dict], item_ids: List[int]) -> Optional[List[int]]:
+def _bt_order_from_progress(rows: List[dict], item_ids: List[int]) -> List[int]:
     """
     Compute BT thetas from all matches in progress and return item_ids sorted by theta desc.
-    Returns None if not enough matches to be meaningful.
+    Raises RuntimeError with a clear reason if BT cannot be produced.
     """
     W, N, total = _build_bt_counts(rows)
     if total < BT_MIN_MATCHES_BT:
-        return None
+        raise RuntimeError(
+            f"Bradley–Terry not computed: only {total} match(es) recorded "
+            f"(minimum required: {BT_MIN_MATCHES_BT})."
+        )
     theta = _fit_bradley_terry(item_ids, W, N, iters=BT_ITERS, reg_lambda=BT_REG_LAMBDA)
+    if not theta or any((not math.isfinite(v)) for v in theta.values()):
+        raise RuntimeError("Bradley–Terry not computed: solver produced invalid parameters.")
     ordered = sorted(item_ids, key=lambda oi: (-theta.get(oi, 0.0), oi))
+    if not ordered:
+        raise RuntimeError("Bradley–Terry not computed: empty ranking after fit.")
     return ordered
 
 # ---------- Output ----------
@@ -532,30 +535,28 @@ def print_progress(state: State) -> None:
 def write_order_csv(state: State, rows: Optional[List[dict]] = None) -> None:
     """
     Final order is produced by a path-independent Bradley–Terry fit over all recorded matches.
-    If there are no/too-few matches, fall back to the current Elo snapshot (deterministic).
+    If BT cannot be produced, we print a precise reason and then fall back to Elo
+    so that an order is still emitted for downstream steps.
     """
     item_ids = [it.original_index for it in state.items]
-    ordered_bt: Optional[List[int]] = None
-
     if rows is None:
         rows = read_progress_lines()
 
     try:
         ordered_bt = _bt_order_from_progress(rows, item_ids)
-    except Exception as e:
-        print(f"Warning: BT ranking failed with error: {e}. Falling back to Elo order.")
-
-    if ordered_bt is None:
-        # Fallback: sort by Elo desc (stable tie by original index)
-        ordered = sorted(item_ids, key=lambda oi: (-state.ratings[oi], oi))
         with open(ORDER_PATH, "w", encoding="utf-8") as f:
-            f.write(",".join(map(str, ordered)) + "\n")
-        print(f"\nWrote ranking via Elo fallback ({len(ordered)} items) to {ORDER_PATH}")
+            f.write(",".join(map(str, ordered_bt)) + "\n")
+        print(f"\nWrote ranking (Bradley–Terry, {len(ordered_bt)} items) to {ORDER_PATH}")
         return
-
-    with open(ORDER_PATH, "w", encoding="utf-8") as f:
-        f.write(",".join(map(str, ordered_bt)) + "\n")
-    print(f"\nWrote ranking (Bradley–Terry, {len(ordered_bt)} items) to {ORDER_PATH}")
+    except Exception as e:
+        reason = str(e).strip() or e.__class__.__name__
+        # Fall back to Elo *with an explicit explanation*
+        ordered_elo = sorted(item_ids, key=lambda oi: (-state.ratings[oi], oi))
+        with open(ORDER_PATH, "w", encoding="utf-8") as f:
+            f.write(",".join(map(str, ordered_elo)) + "\n")
+        print("\n[BT → Elo Fallback]")
+        print(f"Reason: {reason}")
+        print(f"Wrote ranking via Elo fallback ({len(ordered_elo)} items) to {ORDER_PATH}")
 
 # ---------- Main ----------
 def main() -> None:
@@ -617,7 +618,8 @@ def main() -> None:
         print_progress(state)
 
     # Final ordering (Bradley–Terry over all matches; Elo only used for scheduling)
-    write_order_csv(state, rows=rows)
+    # IMPORTANT: re-read fresh progress so we don't pass a stale snapshot.
+    write_order_csv(state)  # re-reads progress.jsonl internally
 
 if __name__ == "__main__":
     main()
