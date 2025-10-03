@@ -20,13 +20,13 @@ Behavior (STRICT HAPPY PATH, no silent fallbacks):
 - Ordering changes:
     * Determine *all* groups first, then order groups by the best (highest-ranked) member
       according to ./rerank/order.csv (rank 1 = best).
-    * Within each group, order relevant filenames by their rank in ./rerank/order.csv (not by filename).
+    * Within each group, **keep relevant filenames in their natural numeric filename order** (not by rank).
     * For each relevant section, inject a `"result_rank": <N>` line at the beginning of its metadata.
 - For each adjacent group, prints to STDOUT in this order:
     1) BEFORE chunk (one before the first relevant in the group) with
        `"evidence": "<most recent disqualifier>"` and VERY CLEAR "context-only / NOT RELEVANT" labeling
        (skipped if boundary).
-    2) Every RELEVANT chunk in the group (ordered by rank), each injected with:
+    2) Every RELEVANT chunk in the group (**filename order**), each injected with:
            "result_rank": <N>
            "evidence":    "<from this run>"
     3) AFTER chunk (one after the last relevant in the group) with
@@ -381,6 +381,12 @@ def find_most_recent_disqualifier(filename: str, inclusive_run: int) -> Tuple[in
 
 # ---------- Printing (deferred until *after* all ordering is computed) ----------
 
+def _assert_strictly_increasing_numeric(group: List[str]) -> None:
+    nums = [parse_filename_strict(fn).num for fn in group]
+    if any(b <= a for a, b in zip(nums, nums[1:])):
+        raise ValueError(f"Group not strictly increasing by filename index: {group}")
+
+
 def print_group_to_stdout(group: List[str],
                           evidence_map: Dict[str, List[str]],
                           current_run: int,
@@ -388,22 +394,22 @@ def print_group_to_stdout(group: List[str],
     """
     Print one adjacent group:
       - BEFORE context (most recent disqualifier) — omitted if boundary (neighbor missing/out-of-bounds)
-      - RELEVANT files (ordered by rank_in_csv asc), with "result_rank" + "evidence"
+      - RELEVANT files (**filename order**), with "result_rank" + "evidence"
       - AFTER  context (most recent disqualifier) — omitted if boundary (neighbor missing/out-of-bounds)
     """
     if not group:
         raise ValueError("Internal error: empty group encountered.")
 
-    # Determine neighbors using filename adjacency (strict)
+    # Sanity: enforce natural filename order inside the group
+    _assert_strictly_increasing_numeric(group)
+
+    # Determine neighbors using filename adjacency (strict) from true numeric bounds
     first_pf = parse_filename_strict(group[0])
-    last_pf = parse_filename_strict(group[-1])
+    last_pf  = parse_filename_strict(group[-1])
 
     # Compute neighbor names; if before would be negative, treat as boundary (omit)
-    before_name: Optional[str] = None
-    if first_pf.num - 1 >= 0:
-        before_name = first_pf.format(first_pf.num - 1)
-
-    after_name: Optional[str] = last_pf.format(last_pf.num + 1)  # may or may not exist as a file
+    before_name: Optional[str] = first_pf.format(first_pf.num - 1) if first_pf.num > 0 else None
+    after_name:  Optional[str] = last_pf.format(last_pf.num + 1)    # may or may not exist as a file
 
     # Title
     title = f"{group[0]} .. {group[-1]}" if len(group) > 1 else group[0]
@@ -427,15 +433,13 @@ def print_group_to_stdout(group: List[str],
             # Boundary at the beginning: omit BEFORE
             pass
 
-    # RELEVANT(S) — order by rank per order.csv, inject result_rank and evidence
+    # RELEVANT(S) — keep filename order; just annotate with rank and evidence
     # Validate all members have ranks
     for fn in group:
         if fn not in rank_of:
             raise KeyError(f"Relevant file {fn!r} not present in order.csv mapping.")
 
-    group_sorted = sorted(group, key=lambda fn: rank_of[fn])
-
-    for fn in group_sorted:
+    for fn in group:
         evidences = evidence_map.get(fn)
         if not evidences:
             raise KeyError(f"Relevant file {fn!r} missing required evidence entries in newest run.")
@@ -498,10 +502,10 @@ def main() -> None:
             )
         filename_rank[fn] = index_to_rank[idx]
 
-    # 6) Order each group’s members by rank ascending (best first)
-    groups_sorted_members: List[List[str]] = [
-        sorted(g, key=lambda name: filename_rank[name]) for g in groups
-    ]
+    # 6) Keep each group's members in natural filename order (sanity-check strictly increasing)
+    for g in groups:
+        _assert_strictly_increasing_numeric(g)
+    groups_sorted_members: List[List[str]] = groups  # preserve internal order
 
     # 7) Order the groups themselves by the best (minimum) rank among their members
     group_keys: List[Tuple[int, int]] = []  # (min_rank_in_group, original_position) for stability
