@@ -268,7 +268,7 @@ def llm_clean_to_codeblock(raw: str, max_retries: int = 6) -> Tuple[str, int]:
         raise RuntimeError("LLM client not initialized")
 
     messages = [
-        {"role": "system", "content": "Follow instructions exactly. Think step-by-step, but only return the requested code block."},
+        {"role": "system", "content": "Follow instructions exactly, output only code block containing the requested raw text. Respond in full, don't dare to omit or skip content in the output."},
         {"role": "user", "content": _CLEAN_PROMPT_TEMPLATE.format(raw=raw)}
     ]
     last_err: Optional[str] = None
