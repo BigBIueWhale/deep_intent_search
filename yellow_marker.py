@@ -250,7 +250,7 @@ def run_llm_highlight(text_inner: str, search_intent: str, max_retries: int = 8)
 
             # Light validity: length must be >= input (or equal)
             if len(block) < len(text_codeblock):
-                last_err = "Returned code block is shorter than input; likely content omitted."
+                last_err = f"Returned code block is shorter than input (len(block)={len(block)} < len(text_codeblock)={len(text_codeblock)}); likely content omitted."
                 print(f"Retry {attempt}/{max_retries}: {last_err}")
                 messages.append({"role": "user", "content": "Your output must contain the FULL TEXT unchanged except for inserted <mark-yellow> tags. Do not omit anything."})
                 continue
