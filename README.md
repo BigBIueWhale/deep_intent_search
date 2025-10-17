@@ -26,6 +26,35 @@ Instead of overselling relevance, the model "performs" by writing a high-quality
 
 - 🔢 Classic keyword-based lexical search algorithms
 
+## Normal Flow
+
+1. [semantic_splitter.py](./semantic_splitter.py):
+    - **Input:** `--files path1 path2`
+    - **Final output:** [./split/chunks](./split/chunks/)
+2. [deep_search.py](./deep_search.py):
+    - **Input:**
+      1. [./split/chunks](./split/chunks/)
+      2. `--query "Interested in content that ..."`
+      3. Newest `search_runs/xxxx.jsonl` if exists.
+    - **Output:** [./search_runs/0001.jsonl](./search_runs/0001.jsonl) ([0002.jsonl](./search_runs/0002.jsonl) etc for refinement searches)
+3. [rerank.py](./rerank.py):
+    - **Input:**
+      1. [./split/chunks](./split/chunks/)
+      2. Newest `search_runs/xxxx.jsonl`
+      3. `--query "Interested in content that... Priority to content that..."`
+    - **Final output:** [./rerank/order.csv](./rerank/order.csv)
+4. [collect_transform_pretty.py](./collect_transform_pretty.py)
+    - **Input:**
+      1. [./split/chunks](./split/chunks/)
+      2. Newest `search_runs/xxxx.jsonl`
+      3. [./rerank/order.csv](./rerank/order.csv)
+    - **Final output:** [./pretty/000001.txt](./pretty/000001.txt) (and `000002.txt` etc)
+5. [yellow_marker.py](./yellow_marker.py)
+    - **Input:**
+      1. [./pretty/000001.txt](./pretty/000001.txt) (and `000002.txt` etc)
+      2. Newest `search_runs/xxxx.jsonl`- take "query" from first line of jsonl
+    - **Final output:** [./yellow_marker/000001.txt](./pretty/000001.txt) (and `000002.txt` etc)
+
 ## Create .env
 
 Create `./.env` with:
