@@ -273,7 +273,7 @@ def chat_complete(
     if hybrid_nothink_switch:
         # Insert "/no_think" at the beginning of the system prompt
         system_prompt = messages[0]
-        system_prompt["content"] = f"/no_think {system_prompt["content"]}"
+        system_prompt["content"] = f"/no_think {system_prompt['content']}"
 
     if hybrid_nothink_switch or not can_think:
         options["num_predict"] = max_completion_tokens
