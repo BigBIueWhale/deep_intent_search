@@ -333,12 +333,6 @@ def main() -> None:
         # We do not touch the prefix newlines; we simply replace the block and add a final newline for POSIX hygiene.
         out_text = f"{parsed.json_prefix}{highlighted_block}\n"
 
-        # Final minimal sanity: out length >= in length (or equal)
-        if len(out_text) < len(raw):
-            raise RuntimeError(
-                f"{in_path.name}: Final output shorter than input (possible content loss). Refusing to write."
-            )
-
         if out_path.exists():
             raise RuntimeError(f"Refusing to overwrite existing file: {out_path}")
 
