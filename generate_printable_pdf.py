@@ -9,6 +9,15 @@ self-diagnosable without a debugger:
 - Every error includes PHASE, FILE, GROUP, COVER, PAGE, and an actionable HINT when useful.
 - Root cause is preserved via "raise ... from e" and included inline as "CAUSE: repr(e)".
 - Strict, fail-loud behavior remains identical to the previous version.
+- Smaller default font sizes (body/mono) and kept leading & spacing proportional so
+  pagination estimates remain correct automatically.
+- Cover page is more stylized while remaining ink-light (thin rules, subtle accents).
+- Highlight spans (<mark-yellow>...</mark-yellow>) now render as **bold + underlined**
+  instead of gray highlighter fills (better for black & white printers).
+- Title baseline aligned so “Cover N” sits exactly where intended (no half-line drift).
+- Cover shows content page range and groups range in math notation (e.g., pages [2, 21], groups [1, 7]).
+- Group pages titled as “Relevance i/Total” instead of filenames.
+- Underlines now span through spaces for continuous emphasis.
 
 Usage:
     python generate_printable_pdf.py --out ./printable/book.pdf --max-pages 20
@@ -61,12 +70,27 @@ MARGIN_B = 60.0
 # ---------- Fonts & sizes ----------
 FONT_SANS_NAME = "DejaVuSans"
 FONT_MONO_NAME = "DejaVuSansMono"
-DEFAULT_BODY_SIZE = 10.6
-DEFAULT_MONO_SIZE = 9.8
-LEADING_FACTOR = 1.28  # line height multiplier
-HILITE_GRAY = 0.85
+
+# Decreased defaults (B/W friendly) — pagination auto-adjusts since leading derives from size.
+DEFAULT_BODY_SIZE = 9.4     # was 10.6
+DEFAULT_MONO_SIZE = 8.8     # was 9.8
+LEADING_FACTOR = 1.24       # slight tightening from 1.28 to match smaller fonts
+
+# ---------- Ink-light styling parameters ----------
+# Note: We no longer use gray highlighter rectangles for marked spans.
+# Keep grays for hairline rules & accents only.
+HILITE_GRAY = 0.85     # kept for cover accents (no big fills)
 RULE_GRAY = 0.6
 COVER_RULE_GRAY = 0.5
+
+# Faux-bold & underline settings for marked spans (printer-friendly)
+FAUX_BOLD_OFFSET = 0.25        # small x-offset to "double-stroke" text for a bolder feel
+UNDERLINE_THICKNESS = 0.6      # hairline; readable but not inky
+UNDERLINE_OFFSET = 1.0         # distance below baseline (pt)
+
+# Cover title sizing and baseline tweak to align visually with accent bar
+COVER_TITLE_SIZE = 28
+COVER_TITLE_BASELINE_ADJ = 12.0  # move baseline downward to avoid sitting "half a line" high
 
 # ===================== Context & helpers =====================
 @dataclass
@@ -517,16 +541,16 @@ def plan_covers(groups: List[GroupPrepared], max_pages: int, cfg: LayoutConfig, 
 
 # ===================== Drawing =====================
 def draw_footer(c: rl_canvas.Canvas, page_num: int) -> None:
-    c.setFont(FONT_SANS_NAME, 8.8)
+    c.setFont(FONT_SANS_NAME, 8.6)  # slightly smaller footer for decreased body size
     txt = f"{page_num}"
-    w = pdfmetrics.stringWidth(txt, FONT_SANS_NAME, 8.8)
+    w = pdfmetrics.stringWidth(txt, FONT_SANS_NAME, 8.6)
     c.setFillColor(black)
     c.drawString(PAGE_W - MARGIN_R - w, MARGIN_B * 0.5, txt)
 
 def draw_rule(c: rl_canvas.Canvas, y: float, gray: float = RULE_GRAY) -> None:
     c.saveState()
     c.setFillGray(gray)
-    c.rect(MARGIN_L, y - 0.6, PAGE_W - MARGIN_L - MARGIN_R, 0.6, stroke=0, fill=1)
+    c.rect(MARGIN_L, y - 0.5, PAGE_W - MARGIN_L - MARGIN_R, 0.5, stroke=0, fill=1)
     c.restoreState()
 
 def start_new_page(c: rl_canvas.Canvas, page_num: int) -> int:
@@ -535,56 +559,103 @@ def start_new_page(c: rl_canvas.Canvas, page_num: int) -> int:
         c.showPage()
     return page_num + 1
 
-def draw_cover_page(c: rl_canvas.Canvas, cover: Cover, cfg: LayoutConfig, page_num: int, ctx: Ctx) -> int:
+def draw_cover_page(
+    c: rl_canvas.Canvas,
+    cover: Cover,
+    cfg: LayoutConfig,
+    page_num: int,
+    ctx: Ctx,
+    content_page_range: Optional[Tuple[int, int]],
+    group_idx_range: Optional[Tuple[int, int]]
+) -> int:
+    """
+    Stylized, ink-light cover:
+      - Large title with a thin accent bar
+      - Subtle frame around the content area
+      - Compact metrics section and wrapped group listing
+      - Shows content page range and groups range in math notation.
+    """
     try:
         page_num = start_new_page(c, page_num)
-        # Title
-        c.setFont(FONT_SANS_NAME, 26)
-        c.drawString(MARGIN_L, PAGE_H - MARGIN_T - 6, f"Cover {cover.index}")
-        draw_rule(c, PAGE_H - MARGIN_T - 18, COVER_RULE_GRAY)
 
-        # Summary
-        y = PAGE_H - MARGIN_T - 54
-        c.setFont(FONT_SANS_NAME, 12.5)
-        c.drawString(MARGIN_L, y, f"Groups in this cover: {len(cover.groups)}")
-        y -= 20
+        # Frame (very light)
+        c.saveState()
+        c.setStrokeGray(0.7)
+        c.setLineWidth(0.8)
+        c.rect(MARGIN_L - 8, MARGIN_B - 8, PAGE_W - (MARGIN_L + MARGIN_R) + 16, PAGE_H - (MARGIN_T + MARGIN_B) + 16, stroke=1, fill=0)
+        c.restoreState()
+
+        # Title row (adjusted baseline)
+        nominal_top = PAGE_H - MARGIN_T - 6
+        title_y = nominal_top - COVER_TITLE_BASELINE_ADJ
+
+        # Left accent bar stays as before (was correct), independent of the baseline tweak
+        c.saveState()
+        c.setFillGray(0.2)
+        c.rect(MARGIN_L - 6, nominal_top - 20, 2, 26, stroke=0, fill=1)
+        c.restoreState()
+
+        # Title text
+        c.setFont(FONT_SANS_NAME, COVER_TITLE_SIZE)
+        c.drawString(MARGIN_L, title_y, f"Cover {cover.index}")
+
+        # Slim rules above/below title
+        draw_rule(c, title_y - 6, COVER_RULE_GRAY)
+        draw_rule(c, title_y - 12, COVER_RULE_GRAY)
+
+        # Summary metrics, compact layout
+        y = title_y - 36
+        c.setFont(FONT_SANS_NAME, 12.0)
+        c.drawString(MARGIN_L, y, f"Groups: {len(cover.groups)}")
+        y -= 18
         c.drawString(MARGIN_L, y, f"Content pages in this cover: {cover.pages_in_cover}")
-        y -= 20
+        y -= 18
         c.drawString(MARGIN_L, y, f"Relevant results in this cover: {cover.total_relevants}")
-        y -= 26
+        y -= 18
+
+        # Ranges in math notation
+        if content_page_range:
+            a, b = content_page_range
+            c.drawString(MARGIN_L, y, f"Content pages range: [{a}, {b}]")
+            y -= 18
+        if group_idx_range:
+            a, b = group_idx_range
+            c.drawString(MARGIN_L, y, f"Groups range: [{a}, {b}]")
+            y -= 22
+
         draw_rule(c, y + 10, COVER_RULE_GRAY)
         y -= 8
 
-        # List groups with ranks
-        c.setFont(FONT_SANS_NAME, 11.2)
+        # List groups with ranks (wrapped)
+        c.setFont(FONT_SANS_NAME, 11.0)
         usable_w = PAGE_W - MARGIN_L - MARGIN_R
         for g in cover.groups:
             line1 = f"• {g.filename} — ranks: {g.ranks_display}"
-            if pdfmetrics.stringWidth(line1, FONT_SANS_NAME, 11.2) <= usable_w:
+            if pdfmetrics.stringWidth(line1, FONT_SANS_NAME, 11.0) <= usable_w:
                 c.drawString(MARGIN_L, y, line1)
-                y -= 18
+                y -= 16
             else:
                 words = line1.split(" ")
                 cur = ""
                 while words:
-                    w = words[0]
-                    trial = (cur + " " + w).strip()
-                    if pdfmetrics.stringWidth(trial, FONT_SANS_NAME, 11.2) <= usable_w:
+                    w0 = words[0]
+                    trial = (cur + " " + w0).strip()
+                    if pdfmetrics.stringWidth(trial, FONT_SANS_NAME, 11.0) <= usable_w:
                         cur = trial
                         words.pop(0)
                     else:
                         c.drawString(MARGIN_L, y, cur)
-                        y -= 16
+                        y -= 15
                         cur = ""
                 if cur:
                     c.drawString(MARGIN_L, y, cur)
-                    y -= 18
+                    y -= 16
             if y < MARGIN_B + 40:
                 draw_footer(c, page_num)
                 c.showPage()
                 page_num += 1
                 y = PAGE_H - MARGIN_T
-                c.setFont(FONT_SANS_NAME, 11.2)
+                c.setFont(FONT_SANS_NAME, 11.0)
 
         draw_footer(c, page_num)
         return page_num
@@ -616,6 +687,13 @@ def draw_lines_body_with_marks(
     ctx: Ctx,
     file: str
 ) -> Tuple[float, int]:
+    """
+    Draw body text. Marked spans are **bold + underlined** (printer-friendly).
+    Implementation details:
+      - Faux bold: draw the segment twice with a tiny x-offset.
+      - Underline: draw a hairline under each marked segment's width.
+      - Underlines now also cover whitespace segments to form a continuous line.
+    """
     try:
         c.setFont(FONT_SANS_NAME, cfg.body_size)
         for li, parts in enumerate(wrapped):
@@ -626,26 +704,76 @@ def draw_lines_body_with_marks(
                 y = PAGE_H - MARGIN_T
                 c.setFont(FONT_SANS_NAME, cfg.body_size)
 
+            # First pass: draw text (normal or faux-bold for marked)
             x = MARGIN_L
-            c.saveState()
             for seg, mk in parts:
                 w = pdfmetrics.stringWidth(seg, FONT_SANS_NAME, cfg.body_size)
-                if mk and seg.strip() != "":
-                    c.setFillGray(HILITE_GRAY)
-                    c.rect(x, y - cfg.leading_body + 2.0, w, cfg.leading_body * 0.9, stroke=0, fill=1)
+                c.setFillColor(black)
+                if mk and seg != "":
+                    # Faux bold: draw twice with a minute offset
+                    c.drawString(x, y - cfg.leading_body, seg)
+                    c.drawString(x + FAUX_BOLD_OFFSET, y - cfg.leading_body, seg)
+                else:
+                    c.drawString(x, y - cfg.leading_body, seg)
+                x += w
+
+            # Second pass: draw underlines for marked segments — include spaces this time
+            x = MARGIN_L
+            c.saveState()
+            c.setStrokeColor(black)
+            c.setLineWidth(UNDERLINE_THICKNESS)
+            baseline = y - cfg.leading_body
+            for seg, mk in parts:
+                w = pdfmetrics.stringWidth(seg, FONT_SANS_NAME, cfg.body_size)
+                if mk and w > 0:
+                    underline_y = baseline - UNDERLINE_OFFSET
+                    c.line(x, underline_y, x + w, underline_y)
                 x += w
             c.restoreState()
-
-            x = MARGIN_L
-            for seg, _mk in parts:
-                c.setFillColor(black)
-                c.drawString(x, y - cfg.leading_body, seg)
-                x += pdfmetrics.stringWidth(seg, FONT_SANS_NAME, cfg.body_size)
 
             y -= cfg.leading_body
         return y, page_num
     except Exception as e:
         ctx_raise(ctx.with_(phase="draw-body", file=file, page=page_num), "Failed drawing body line.", f"Line index: {li}", e)
+
+# ---------- Ranges helpers (for cover pages) ----------
+def compute_content_page_ranges(covers: List[Cover]) -> Dict[int, Tuple[int, int]]:
+    """
+    Returns {cover.index: (start, end)} for content pages in PDF numbering.
+    Content pages exclude the cover page itself.
+    Calculation:
+      - Each cover contributes 1 (its cover page) + pages_in_cover (its content)
+      - For cover i, with prior total P = sum_{k<i} (1 + pages_in_cover_k):
+          cover page = P + 1
+          content pages = [P + 2, P + 1 + pages_in_cover_i]
+    """
+    ranges: Dict[int, Tuple[int, int]] = {}
+    prior_total = 0
+    for cv in covers:
+        if cv.pages_in_cover <= 0:
+            ranges[cv.index] = (0, 0)
+        else:
+            start = prior_total + 2
+            end = prior_total + 1 + cv.pages_in_cover
+            ranges[cv.index] = (start, end)
+        prior_total += 1 + cv.pages_in_cover
+    return ranges
+
+def compute_group_index_ranges(covers: List[Cover]) -> Dict[int, Tuple[int, int]]:
+    """
+    Returns {cover.index: (start_idx, end_idx)} 1-based global group indices.
+    """
+    ranges: Dict[int, Tuple[int, int]] = {}
+    prior_groups = 0
+    for cv in covers:
+        if len(cv.groups) == 0:
+            ranges[cv.index] = (0, 0)
+        else:
+            start = prior_groups + 1
+            end = prior_groups + len(cv.groups)
+            ranges[cv.index] = (start, end)
+        prior_groups += len(cv.groups)
+    return ranges
 
 def render_book(covers: List[Cover], out_path: Path, cfg: LayoutConfig, ctx: Ctx) -> None:
     try:
@@ -653,18 +781,29 @@ def render_book(covers: List[Cover], out_path: Path, cfg: LayoutConfig, ctx: Ctx
     except Exception as e:
         ctx_raise(ctx.with_(phase="create-pdf", file=str(out_path)), "Failed to create PDF canvas.", "", e)
 
+    # Precompute ranges for display on cover pages
+    content_ranges = compute_content_page_ranges(covers)
+    group_ranges = compute_group_index_ranges(covers)
+    total_groups = sum(len(cv.groups) for cv in covers)
+    current_group_idx = 1  # global 1-based index for "Relevance i/Total"
+
     page_num = 0
     try:
         for cover in covers:
-            page_num = draw_cover_page(c, cover, cfg, page_num, ctx)
+            page_num = draw_cover_page(
+                c, cover, cfg, page_num, ctx,
+                content_page_range=content_ranges.get(cover.index),
+                group_idx_range=group_ranges.get(cover.index)
+            )
             for g in cover.groups:
                 page_num = start_new_page(c, page_num)
                 y = PAGE_H - MARGIN_T
 
-                # Group title
+                # Group title — now “Relevance i/Total”
                 try:
-                    c.setFont(FONT_SANS_NAME, 13.5)
-                    c.drawString(MARGIN_L, y - cfg.leading_body * 0.9, f"{g.filename}")
+                    c.setFont(FONT_SANS_NAME, 13.0)  # slightly reduced to match smaller body
+                    title_txt = f"Relevance {current_group_idx}/{total_groups}"
+                    c.drawString(MARGIN_L, y - cfg.leading_body * 0.9, title_txt)
                     draw_rule(c, y - cfg.leading_body * 1.05)
                     y -= (cfg.leading_body * 1.4)
                 except Exception as e:
@@ -701,6 +840,8 @@ def render_book(covers: List[Cover], out_path: Path, cfg: LayoutConfig, ctx: Ctx
                 # trailing space
                 y -= cfg.para_space
                 draw_footer(c, page_num)
+                current_group_idx += 1
+
         if page_num == 0:
             ctx_raise(ctx.with_(phase="render"), "No pages were generated.", "Input may be empty.")
         try:
