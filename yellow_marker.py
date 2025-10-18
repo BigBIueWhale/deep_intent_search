@@ -329,12 +329,6 @@ def main() -> None:
         # Run LLM (with strong retry discipline)
         highlighted_block = run_llm_highlight(parsed.codeblock_inner, search_intent)
 
-        # As an extra guard: demand output length >= input block length (or equal)
-        if len(highlighted_block) < len(parsed.codeblock_full):
-            raise RuntimeError(
-                f"{in_path.name}: LLM returned a smaller code block than input after validation; refusing to write."
-            )
-
         # Compose output: keep JSON prefix exactly as-is, then append the new code block.
         # We do not touch the prefix newlines; we simply replace the block and add a final newline for POSIX hygiene.
         out_text = f"{parsed.json_prefix}{highlighted_block}\n"
