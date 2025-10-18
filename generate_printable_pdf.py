@@ -245,7 +245,7 @@ def massage_json_rows_keep_top_evidence(rows: List[Dict[str, Any]], ctx: Ctx, fi
 
     rank_nums = [p[0] for p in parsed]
     if denom is not None:
-        ranks_disp = " · ".join(f"#{n}" for n in rank_nums) + f"  (out of {denom})"
+        ranks_disp = " · ".join(f"#{n}" for n in rank_nums)
     else:
         ranks_disp = " · ".join(f"#{n}/{d}" for (n, d, _) in parsed)
 
@@ -775,7 +775,31 @@ def compute_group_index_ranges(covers: List[Cover]) -> Dict[int, Tuple[int, int]
         prior_groups += len(cv.groups)
     return ranges
 
-def render_book(covers: List[Cover], out_path: Path, cfg: LayoutConfig, ctx: Ctx) -> None:
+def compute_global_relevance_total(inputs: List[GroupInput], ctx: Ctx) -> int:
+    """
+    Scan all JSON rows across all groups, parse 'relevance_score' as 'X/Y',
+    and return a single global total Y to use in the 'Relevance i/Y' titles.
+
+    If multiple denominators are observed, we pick the maximum Y (most conservative),
+    which aligns with the typical meaning of 'out of Y'.
+    """
+    denoms: List[int] = []
+    for gi in inputs:
+        for i, r in enumerate(gi.json_rows):
+            rs = r.get("relevance_score")
+            if isinstance(rs, str):
+                try:
+                    _, d = parse_rank_strict(rs, ctx, gi.filename)
+                    denoms.append(d)
+                except Exception:
+                    # Let upstream parsing catch invalid rows during normal flow;
+                    # we skip here to keep this helper non-fatal.
+                    pass
+    if not denoms:
+        return 0
+    return max(denoms)
+
+def render_book(covers: List[Cover], out_path: Path, cfg: LayoutConfig, ctx: Ctx, global_total_relevance: int) -> None:
     try:
         c = rl_canvas.Canvas(str(out_path), pagesize=A4)
     except Exception as e:
@@ -802,7 +826,8 @@ def render_book(covers: List[Cover], out_path: Path, cfg: LayoutConfig, ctx: Ctx
                 # Group title — now “Relevance i/Total”
                 try:
                     c.setFont(FONT_SANS_NAME, 13.0)  # slightly reduced to match smaller body
-                    title_txt = f"Relevance {current_group_idx}/{total_groups}"
+                    denom_for_title = global_total_relevance if global_total_relevance > 0 else total_groups
+                    title_txt = f"Relevance {current_group_idx}/{denom_for_title}"
                     c.drawString(MARGIN_L, y - cfg.leading_body * 0.9, title_txt)
                     draw_rule(c, y - cfg.leading_body * 1.05)
                     y -= (cfg.leading_body * 1.4)
@@ -878,6 +903,9 @@ def main() -> None:
         for p in files:
             inputs.append(parse_one_yellow_file(p, ctx.with_(phase="parse", file=p.name)))
 
+        # Compute global denominator for "Relevance i/Total" titles
+        global_total = compute_global_relevance_total(inputs, ctx.with_(phase="parse"))
+
         prepared: List[GroupPrepared] = []
         for gi in inputs:
             rows2, ranks_disp, rel_count = massage_json_rows_keep_top_evidence(gi.json_rows, ctx, gi.filename)
@@ -904,7 +932,7 @@ def main() -> None:
             except Exception as e:
                 ctx_raise(ctx.with_(phase="mkdir", file=str(args.out.parent)), "Failed to create output directory.", "", e)
 
-        render_book(covers, args.out, cfg, ctx.with_(phase="render", file=str(args.out)))
+        render_book(covers, args.out, cfg, ctx.with_(phase="render", file=str(args.out)), global_total_relevance=global_total)
         total_content_pages = sum(cv.pages_in_cover for cv in covers)
         print(
             f"PDF written: {args.out}  | Covers: {len(covers)}  | "
