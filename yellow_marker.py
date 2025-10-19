@@ -182,9 +182,13 @@ SYSTEM_PROMPT = (
 )
 
 USER_PROMPT_TEMPLATE = (
-    "You are a highlighter. Insert <mark-yellow> and </mark-yellow> around the portion of TEXT that is relevant to the SEARCH_INTENT. Do not alter any characters except for inserting these tags.\n\n"
+    "You are a highlighter. Insert <mark-yellow> and </mark-yellow> around portions of TEXT that are relevant to the SEARCH_INTENT. "
+    "The provided TEXT does contain material relevant to the query; your job is to precisely identify and tag those parts. "
+    "Prefer several small, precise highlights over one large span when that better captures relevance. Do not alter any characters except for inserting these tags.\n\n"
     "RULES:\n"
-    "* Span size: choose whatever unit best captures the relevant material—phrase, full sentence, paragraph, or larger—adding surrounding words only if needed for coherence.\n"
+    "* Span size: choose whatever unit best captures the relevant material—phrase, sentence, paragraph—adding surrounding words only if needed for coherence.\n"
+    "* Multiple markers are encouraged when distinct relevant snippets exist; wrap each with its own <mark-yellow>…</mark-yellow> pair.\n"
+    "* Tags must be properly paired with opening and closing tags and must NOT be nested.\n"
     "* Operate ONLY on the TEXT provided below inside a markdown code block (language tag: txt).\n"
     "* Keep original characters, order, spacing, punctuation, and Unicode exactly as-is (only add the tags).\n"
     "* If nothing is relevant, return the TEXT unchanged.\n"
@@ -205,10 +209,46 @@ def ensure_single_txt_codeblock(s: str) -> Optional[str]:
         return None
     return m.group(0)
 
+# --- Yellow-tag validation helpers (opening/closing, no nesting) ---
+TAG_OPEN = "<mark-yellow>"
+TAG_CLOSE = "</mark-yellow>"
+TAG_ANY_RE = re.compile(r"</?mark-yellow>")
+
+def validate_yellow_tags(text: str) -> Tuple[bool, str]:
+    """
+    Validate the yellow tags inside a plain text (no code fences here).
+    Requirements:
+      - Opening and closing tags exist only as <mark-yellow> and </mark-yellow>.
+      - Tags are properly paired.
+      - No nested tags (i.e., cannot open when already open).
+    Returns (ok, reason_if_not_ok).
+    """
+    open_count = 0
+    for m in TAG_ANY_RE.finditer(text):
+        token = m.group(0)
+        if token == TAG_OPEN:
+            if open_count > 0:
+                return (False, "Nested <mark-yellow> detected (opened a tag before closing the previous one).")
+            open_count += 1
+        elif token == TAG_CLOSE:
+            if open_count == 0:
+                return (False, "Unmatched closing </mark-yellow> detected (no prior opening tag).")
+            open_count -= 1
+        else:
+            # Shouldn't happen because regex limits to the two forms
+            return (False, f"Unknown tag variant {token!r} encountered.")
+    if open_count != 0:
+        return (False, "Unclosed <mark-yellow> tag at end of text.")
+    # Additionally, ensure there is no malformed variation like <mark-yellow /> or attributes:
+    if re.search(r"<mark-yellow\s*/?>|<mark-yellow[^>]*>", text) and TAG_OPEN not in text:
+        return (False, "Malformed <mark-yellow> tag variant detected.")
+    return (True, "")
+
 def run_llm_highlight(text_inner: str, search_intent: str, max_retries: int = 8) -> str:
     """
     Send the *exact* prompts. Require exactly one ```txt code block.
     Also ensure returned length >= input length (or equal).
+    Additionally validate yellow tags pairing and structure; retry if invalid.
     """
     if not CLIENT:
         raise RuntimeError("LLM client not initialized (get_client() returned None).")
@@ -245,7 +285,6 @@ def run_llm_highlight(text_inner: str, search_intent: str, max_retries: int = 8)
             if not block:
                 last_err = "Model did not return exactly one ```txt code block."
                 print(f"Retry {attempt}/{max_retries}: {last_err}")
-                messages.append({"role": "user", "content": "Please follow the OUTPUT REQUIREMENT. Return *exactly one* ```txt code block and nothing else."})
                 continue
 
             # Light validity: length must be close in size (or slightly smaller) than input
@@ -253,14 +292,26 @@ def run_llm_highlight(text_inner: str, search_intent: str, max_retries: int = 8)
             if ratio < 0.98:
                 last_err = f"Returned code block is only {ratio}% the length of input (len(block)={len(block)} < len(text_codeblock)={len(text_codeblock)}); likely content omitted."
                 print(f"Retry {attempt}/{max_retries}: {last_err}")
-                messages.append({"role": "user", "content": "Your output must contain the FULL TEXT unchanged except for inserted <mark-yellow> tags. Do not omit anything."})
+                continue
+
+            # Validate yellow tags structure (opening/closing present correctly, no nesting)
+            inner_match = CODEBLOCK_RE.search(block)
+            if not inner_match:
+                last_err = "Internal parse error: could not re-extract inner text from returned code block."
+                print(f"Retry {attempt}/{max_retries}: {last_err}")
+                continue
+            returned_inner = inner_match.group(1)
+
+            ok, reason = validate_yellow_tags(returned_inner)
+            if not ok:
+                last_err = f"Yellow tag validation failed: {reason}"
+                print(f"Retry {attempt}/{max_retries}: {last_err}")
                 continue
 
             return block
         except Exception as e:
             last_err = f"API/parse error: {e}"
             print(f"Retry {attempt}/{max_retries}: {last_err}")
-            messages.append({"role": "user", "content": "An error occurred. Try again, strictly returning one ```txt code block that contains the full TEXT."})
 
     raise RuntimeError(f"LLM failed to produce a valid single txt code block after {max_retries} attempts. Last error: {last_err}")
 
