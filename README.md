@@ -55,7 +55,10 @@ Instead of overselling relevance, the model "performs" by writing a high-quality
       2. Newest `search_runs/xxxx.jsonl`- take "query" from first line of jsonl
     - **Final output:** [./yellow_marker/000001.txt](./pretty/000001.txt) (and `000002.txt` etc)
 6. [generate_printable_pdf.py](./generate_printable_pdf.py)
-    - **Input:** [./yellow_marker/000001.txt](./yellow_marker/000001.txt) (and `000002.txt` etc)
+    - **Input:**
+      1. [./yellow_marker/000001.txt](./yellow_marker/000001.txt) (and `000002.txt` etc)
+      2. Newest `search_runs/xxxx.jsonl`- take "query" from first line of jsonl
+      3. [./rerank/progress.jsonl](./rerank/progress.jsonl)- take "query" from first line of jsonl
     - **Output:** [./printable/printable.pdf](./printable/printable.pdf)
 
 ## Create .env
