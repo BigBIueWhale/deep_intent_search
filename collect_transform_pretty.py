@@ -243,17 +243,17 @@ def join_unique(items: Sequence[str]) -> str:
 
 # --------------- LLM cleaning ---------------
 _CLEAN_PROMPT_TEMPLATE = (
-    "You will receive raw text concatenated from multiple adjacent sections.\n"
-    "Each section began with a single metadata line that has been removed.\n"
-    "Your job: rewrite the ENTIRE text into a single printable, continuous, book-like narrative.\n"
+    "You're a text cleaner.\n"
+    "Your job: rewrite the ENTIRE given text into a single printable, continuous, book-like narrative.\n"
     "STRICT RULES:\n"
     "- Output **one** markdown code block with language tag `txt` (and nothing else).\n"
     "- Preserve all content and names and multilingual Unicode as-is, but remove/ignore markup like HTML tags, CSS, JS.\n"
     "- Convert lists/tables into plain prose where sensible.\n"
     "- Do not invent content.\n"
+    "- Do not omit information / meaning.\n"
     "- Keep the original order.\n"
     "- Remove leftover artifacts (anchors, scripts, styles, boilerplate).\n"
-    "- Ensure paragraphs are readable with sensible sentence boundaries.\n\n"
+    "- Ensure paragraphs are readable with sensible sentence boundaries.\n"
     "Example (toy):\n"
     "INPUT: `<h1>Title</h1>Hi <b>there</b>!` → OUTPUT:\n"
     "```txt\nTitle. Hi there!\n```\n\n"
