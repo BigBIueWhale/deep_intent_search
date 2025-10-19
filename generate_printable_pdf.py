@@ -704,17 +704,22 @@ def draw_intent_ranking_block(
     gap = INTENT_PANEL_COL_GAP
     col_w = (total_w - gap) / 2.0
 
-    # Wrap both columns to lines
+    # Internal padding:
+    # - frame_pad keeps distance from frame to content area
+    # - text_pad keeps distance from column edge to actual text
+    frame_pad = 6.0
+    text_pad  = 6.0
+    # effective width available for wrapping in each column
+    wrap_w = max(0.0, col_w - (2 * text_pad))
+
+    # Wrap both columns to lines with the stricter width (prevents touching the frame)
     c.setFont(FONT_SANS_NAME, INTENT_PANEL_TEXT_SIZE)
-    left_lines  = wrap_sans_words(search_query, col_w, INTENT_PANEL_TEXT_SIZE)
-    right_lines = wrap_sans_words(ranking_query, col_w, INTENT_PANEL_TEXT_SIZE)
+    left_lines  = wrap_sans_words(search_query, wrap_w, INTENT_PANEL_TEXT_SIZE)
+    right_lines = wrap_sans_words(ranking_query, wrap_w, INTENT_PANEL_TEXT_SIZE)
 
     # label heights
     label_h = INTENT_PANEL_LABEL_SIZE * 1.2
     text_leading = INTENT_PANEL_TEXT_SIZE * LEADING_FACTOR
-    # compute max lines we can fit on current page
-    # frame margin inside panel
-    inner_pad = 6.0
 
     # We'll render “panel by panel” possibly across pages:
     y = y_top
@@ -723,12 +728,10 @@ def draw_intent_ranking_block(
     idx_right = 0
 
     while idx_left < len(left_lines) or idx_right < len(right_lines):
-        # Start a new "slice" of the panel on the current page
         # Estimate how many text lines can fit below labels + padding
-        required_head = label_h + INTENT_PANEL_GAP_Y + inner_pad
-        max_text_area = (y - MARGIN_B) - required_head - inner_pad
-        if max_text_area < text_leading:  # not even one line: signal caller to start new page
-            # Caller handles page break; we just return the current y (consumed nothing)
+        required_head = frame_pad + label_h + INTENT_PANEL_GAP_Y + frame_pad
+        max_text_area = (y - MARGIN_B) - required_head
+        if max_text_area < text_leading:
             break
 
         # how many lines per column fit
@@ -744,7 +747,7 @@ def draw_intent_ranking_block(
         slice_rows  = max(len(left_slice), len(right_slice))
 
         # Panel frame height for this slice
-        panel_h = inner_pad + label_h + INTENT_PANEL_GAP_Y + slice_rows * text_leading + inner_pad
+        panel_h = frame_pad + label_h + INTENT_PANEL_GAP_Y + slice_rows * text_leading + frame_pad
 
         # Draw frame
         c.saveState()
@@ -757,22 +760,23 @@ def draw_intent_ranking_block(
         c.saveState()
         c.setFillGray(INTENT_PANEL_LABEL_GRAY)
         c.setFont(FONT_SANS_NAME, INTENT_PANEL_LABEL_SIZE)
-        c.drawString(left_x + inner_pad, y - inner_pad - (label_h * 0.85), "Deep intent (search) query")
-        c.drawString(left_x + inner_pad + col_w + gap, y - inner_pad - (label_h * 0.85), "Ranking query (reranker)")
+        # align labels with text padding inside each column
+        c.drawString(left_x + frame_pad + text_pad, y - frame_pad - (label_h * 0.85), "Deep intent (search) query")
+        c.drawString(left_x + col_w + gap + frame_pad + text_pad, y - frame_pad - (label_h * 0.85), "Ranking query (reranker)")
         c.restoreState()
 
         # Column texts
         c.setFont(FONT_SANS_NAME, INTENT_PANEL_TEXT_SIZE)
-        text_y = y - inner_pad - label_h - INTENT_PANEL_GAP_Y
+        text_y_left = y - frame_pad - label_h - INTENT_PANEL_GAP_Y
         # left column
         for line in left_slice:
-            c.drawString(left_x + inner_pad, text_y - text_leading, line)
-            text_y -= text_leading
+            c.drawString(left_x + frame_pad + text_pad, text_y_left - text_leading, line)
+            text_y_left -= text_leading
         # right column
-        text_y2 = y - inner_pad - label_h - INTENT_PANEL_GAP_Y
+        text_y_right = y - frame_pad - label_h - INTENT_PANEL_GAP_Y
         for line in right_slice:
-            c.drawString(left_x + inner_pad + col_w + gap, text_y2 - text_leading, line)
-            text_y2 -= text_leading
+            c.drawString(left_x + col_w + gap + frame_pad + text_pad, text_y_right - text_leading, line)
+            text_y_right -= text_leading
 
         # advance indices & y
         idx_left  = left_slice_end
@@ -835,10 +839,7 @@ def draw_cover_page(
         # Summary metrics, compact layout
         y = title_y - 36
         c.setFont(FONT_SANS_NAME, 12.0)
-        c.drawString(MARGIN_L, y, f"Groups: {len(cover.groups)}")
-        y -= 18
-        c.drawString(MARGIN_L, y, f"Content pages in this cover: {cover.pages_in_cover}")
-        y -= 18
+        # Removed "Groups: N" and "Content pages in this cover: N" to free up space
         c.drawString(MARGIN_L, y, f"Relevant results in this cover: {cover.total_relevants}")
         y -= 18
 
