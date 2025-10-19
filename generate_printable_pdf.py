@@ -18,6 +18,16 @@ self-diagnosable without a debugger:
 - Cover shows content page range and groups range in math notation (e.g., pages [2, 21], groups [1, 7]).
 - Group pages titled as “Relevance i/Total” instead of filenames.
 - Underlines now span through spaces for continuous emphasis.
+- Each cover page includes:
+    1) The Deep Intent (search) query — read from the newest './search_runs/xxxx.jsonl' (first RS record, 'query').
+    2) The Ranking (reranker) query — read from './rerank/progress.jsonl' (first JSONL line, 'query').
+
+  These appear inside a styled, two-column “Intent & Ranking” block on the cover:
+    - Left: Deep intent (search) query
+    - Right: Ranking query (reranker)
+
+  Word-wrapped, ink-light, fail-loud if missing or malformed. Layout flows gracefully
+  and preserves the rest of the cover content.
 
 Usage:
     python generate_printable_pdf.py --out ./printable/book.pdf --max-pages 20
@@ -28,6 +38,7 @@ import argparse
 import json
 import re
 import sys
+import glob
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
@@ -37,6 +48,11 @@ YELLOW_DIR = Path("./yellow_marker")
 ASSETS_DIR = Path("./assets")
 FONT_SANS = ASSETS_DIR / "DejaVuSans.ttf"
 FONT_MONO = ASSETS_DIR / "DejaVuSansMono.ttf"
+
+# *** NEW: sources for queries ***
+SEARCH_RUNS_DIR = Path("./search_runs")
+RERANK_PROGRESS_PATH = Path("./rerank/progress.jsonl")
+RS_DELIM = "\x1e"  # same record separator used elsewhere in the project
 
 # ---------- Parsing / markers ----------
 CODEBLOCK_RE = re.compile(r"```txt\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
@@ -91,6 +107,14 @@ UNDERLINE_OFFSET = 1.0         # distance below baseline (pt)
 # Cover title sizing and baseline tweak to align visually with accent bar
 COVER_TITLE_SIZE = 28
 COVER_TITLE_BASELINE_ADJ = 12.0  # move baseline downward to avoid sitting "half a line" high
+
+# Intent & Ranking panel tuning (cover page)
+INTENT_PANEL_LABEL_SIZE = 10.5
+INTENT_PANEL_TEXT_SIZE  = 9.6
+INTENT_PANEL_GAP_Y      = 10.0
+INTENT_PANEL_COL_GAP    = 16.0
+INTENT_PANEL_FRAME_GRAY = 0.75
+INTENT_PANEL_LABEL_GRAY = 0.35
 
 # ===================== Context & helpers =====================
 @dataclass
@@ -463,6 +487,53 @@ def wrap_body_with_marks(
     lines_out.append(current_line)
     return lines_out
 
+# Simple word-wrapper for Sans text (no marks, single paragraph)
+def wrap_sans_words(text: str, max_width: float, font_size: float) -> List[str]:
+    """
+    Minimal, predictable word wrap for single-paragraph Sans text (no highlight state).
+    Preserves multiple spaces where possible and breaks long tokens character-wise.
+    """
+    if not text:
+        return [""]
+    # Normalize newlines to spaces (these queries are single-paragraph)
+    text = re.sub(r"\s*\n\s*", " ", text.strip())
+    tokens = re.split(r"(\s+)", text)
+    out: List[str] = []
+    cur = ""
+    for tok in tokens:
+        if tok == "":
+            continue
+        trial = (cur + tok) if cur else tok
+        if string_width(trial, FONT_SANS_NAME, font_size) <= max_width:
+            cur = trial
+            continue
+        # need to emit cur and then place tok (may be long)
+        if cur:
+            out.append(cur)
+            cur = ""
+        if string_width(tok, FONT_SANS_NAME, font_size) <= max_width:
+            cur = tok
+        else:
+            # break the token
+            s = tok
+            while s:
+                lo, hi = 0, len(s)
+                cut = 0
+                while lo < hi:
+                    mid = (lo + hi) // 2
+                    if string_width(s[: mid + 1], FONT_SANS_NAME, font_size) <= max_width:
+                        cut = mid + 1
+                        lo = mid + 1
+                    else:
+                        hi = mid
+                if cut == 0:
+                    cut = 1
+                out.append(s[:cut])
+                s = s[cut:]
+    if cur:
+        out.append(cur)
+    return out
+
 # ===================== Pagination (dry run) =====================
 @dataclass
 class LayoutConfig:
@@ -559,6 +630,160 @@ def start_new_page(c: rl_canvas.Canvas, page_num: int) -> int:
         c.showPage()
     return page_num + 1
 
+# Readers for queries (strict)
+def newest_run_file(ctx: Ctx) -> Path:
+    try:
+        files = sorted(SEARCH_RUNS_DIR.glob("*.jsonl"))
+    except Exception as e:
+        ctx_raise(ctx.with_(phase="query"), f"Failed to list {SEARCH_RUNS_DIR}/", "Ensure directory exists.", e)
+    if not files:
+        ctx_raise(ctx.with_(phase="query"), f"No run files found under {SEARCH_RUNS_DIR}/", "Run deep_search.py first.")
+    return files[-1]
+
+def read_first_rs_json(path: Path, ctx: Ctx) -> Dict[str, Any]:
+    try:
+        blob = path.read_text(encoding="utf-8")
+    except Exception as e:
+        ctx_raise(ctx.with_(phase="query", file=str(path)), "Failed to read search run file.", "", e)
+    parts = [p for p in blob.split(RS_DELIM) if p.strip()]
+    if not parts:
+        ctx_raise(ctx.with_(phase="query", file=str(path)), "Run file contains no RS-delimited JSON objects.", "Expected 'meta' as first record.")
+    try:
+        obj = json.loads(parts[0])
+    except Exception as e:
+        ctx_raise(ctx.with_(phase="query", file=str(path)), "Failed to parse first RS JSON object.", "Check the run file integrity.", e)
+    return obj
+
+def read_search_query(ctx: Ctx) -> str:
+    run = newest_run_file(ctx)
+    meta = read_first_rs_json(run, ctx)
+    q = meta.get("query")
+    if not isinstance(q, str) or not q.strip():
+        ctx_raise(ctx.with_(phase="query", file=str(run)), "Missing 'query' in run meta.", "First RS record must include a non-empty 'query'.")
+    return q.strip()
+
+def read_rerank_query(ctx: Ctx) -> str:
+    if not RERANK_PROGRESS_PATH.exists():
+        ctx_raise(ctx.with_(phase="query", file=str(RERANK_PROGRESS_PATH)), "Missing ./rerank/progress.jsonl", "Run rerank.py first, or provide ranking query.")
+    try:
+        with RERANK_PROGRESS_PATH.open("r", encoding="utf-8") as f:
+            first = f.readline()
+    except Exception as e:
+        ctx_raise(ctx.with_(phase="query", file=str(RERANK_PROGRESS_PATH)), "Failed to read progress.jsonl", "", e)
+    if not first.strip():
+        ctx_raise(ctx.with_(phase="query", file=str(RERANK_PROGRESS_PATH)), "progress.jsonl is empty.", "Expected a first 'meta' JSON line with 'query'.")
+    try:
+        obj = json.loads(first)
+    except Exception as e:
+        ctx_raise(ctx.with_(phase="query", file=str(RERANK_PROGRESS_PATH)), "Failed to parse first JSON line in progress.jsonl", "", e)
+    q = obj.get("query")
+    if not isinstance(q, str) or not q.strip():
+        ctx_raise(ctx.with_(phase="query", file=str(RERANK_PROGRESS_PATH)), "Missing 'query' in progress.jsonl meta.", "First line must include a non-empty 'query'.")
+    return q.strip()
+
+def draw_intent_ranking_block(
+    c: rl_canvas.Canvas,
+    y_top: float,
+    available_height: float,
+    ctx: Ctx,
+    search_query: str,
+    ranking_query: str
+) -> Tuple[float, int]:
+    """
+    Draw a two-column panel:
+      - Left: Deep intent (search) query
+      - Right: Ranking query (reranker)
+    Returns: (y_after, pages_used_delta)
+    The block may consume space and continue on the next page if needed.
+    """
+    # panel geometry
+    left_x  = MARGIN_L
+    right_x = PAGE_W - MARGIN_R
+    total_w = right_x - left_x
+    # columns with fixed gap
+    gap = INTENT_PANEL_COL_GAP
+    col_w = (total_w - gap) / 2.0
+
+    # Wrap both columns to lines
+    c.setFont(FONT_SANS_NAME, INTENT_PANEL_TEXT_SIZE)
+    left_lines  = wrap_sans_words(search_query, col_w, INTENT_PANEL_TEXT_SIZE)
+    right_lines = wrap_sans_words(ranking_query, col_w, INTENT_PANEL_TEXT_SIZE)
+
+    # label heights
+    label_h = INTENT_PANEL_LABEL_SIZE * 1.2
+    text_leading = INTENT_PANEL_TEXT_SIZE * LEADING_FACTOR
+    # compute max lines we can fit on current page
+    # frame margin inside panel
+    inner_pad = 6.0
+
+    # We'll render “panel by panel” possibly across pages:
+    y = y_top
+    pages_used = 0
+    idx_left = 0
+    idx_right = 0
+
+    while idx_left < len(left_lines) or idx_right < len(right_lines):
+        # Start a new "slice" of the panel on the current page
+        # Estimate how many text lines can fit below labels + padding
+        required_head = label_h + INTENT_PANEL_GAP_Y + inner_pad
+        max_text_area = (y - MARGIN_B) - required_head - inner_pad
+        if max_text_area < text_leading:  # not even one line: signal caller to start new page
+            # Caller handles page break; we just return the current y (consumed nothing)
+            break
+
+        # how many lines per column fit
+        max_lines_this_page = int(max_text_area // text_leading)
+        if max_lines_this_page <= 0:
+            break
+
+        # slice lines for this page
+        left_slice_end  = min(len(left_lines),  idx_left  + max_lines_this_page)
+        right_slice_end = min(len(right_lines), idx_right + max_lines_this_page)
+        left_slice  = left_lines[idx_left:left_slice_end]
+        right_slice = right_lines[idx_right:right_slice_end]
+        slice_rows  = max(len(left_slice), len(right_slice))
+
+        # Panel frame height for this slice
+        panel_h = inner_pad + label_h + INTENT_PANEL_GAP_Y + slice_rows * text_leading + inner_pad
+
+        # Draw frame
+        c.saveState()
+        c.setStrokeGray(INTENT_PANEL_FRAME_GRAY)
+        c.setLineWidth(0.8)
+        c.rect(left_x - 4, y - panel_h, total_w + 8, panel_h, stroke=1, fill=0)
+        c.restoreState()
+
+        # Labels
+        c.saveState()
+        c.setFillGray(INTENT_PANEL_LABEL_GRAY)
+        c.setFont(FONT_SANS_NAME, INTENT_PANEL_LABEL_SIZE)
+        c.drawString(left_x + inner_pad, y - inner_pad - (label_h * 0.85), "Deep intent (search) query")
+        c.drawString(left_x + inner_pad + col_w + gap, y - inner_pad - (label_h * 0.85), "Ranking query (reranker)")
+        c.restoreState()
+
+        # Column texts
+        c.setFont(FONT_SANS_NAME, INTENT_PANEL_TEXT_SIZE)
+        text_y = y - inner_pad - label_h - INTENT_PANEL_GAP_Y
+        # left column
+        for line in left_slice:
+            c.drawString(left_x + inner_pad, text_y - text_leading, line)
+            text_y -= text_leading
+        # right column
+        text_y2 = y - inner_pad - label_h - INTENT_PANEL_GAP_Y
+        for line in right_slice:
+            c.drawString(left_x + inner_pad + col_w + gap, text_y2 - text_leading, line)
+            text_y2 -= text_leading
+
+        # advance indices & y
+        idx_left  = left_slice_end
+        idx_right = right_slice_end
+        y = y - panel_h - INTENT_PANEL_GAP_Y
+        pages_used += 0  # still same page for this slice
+
+        # If we still have lines, the caller will detect no room for more content and start a new page.
+
+    return y, pages_used
+
 def draw_cover_page(
     c: rl_canvas.Canvas,
     cover: Cover,
@@ -566,7 +791,10 @@ def draw_cover_page(
     page_num: int,
     ctx: Ctx,
     content_page_range: Optional[Tuple[int, int]],
-    group_idx_range: Optional[Tuple[int, int]]
+    group_idx_range: Optional[Tuple[int, int]],
+    # Queries to inject
+    search_query: str,
+    ranking_query: str
 ) -> int:
     """
     Stylized, ink-light cover:
@@ -574,6 +802,7 @@ def draw_cover_page(
       - Subtle frame around the content area
       - Compact metrics section and wrapped group listing
       - Shows content page range and groups range in math notation.
+      - Two-column 'Intent & Ranking' panel with the search and reranker queries
     """
     try:
         page_num = start_new_page(c, page_num)
@@ -626,15 +855,59 @@ def draw_cover_page(
         draw_rule(c, y + 10, COVER_RULE_GRAY)
         y -= 8
 
+        # Intent & Ranking block
+        # Try to draw the panel; if no vertical room, we push to next page (after writing footer)
+        panel_start_y = y
+        y_after_panel, _ = draw_intent_ranking_block(
+            c=c,
+            y_top=panel_start_y,
+            available_height=panel_start_y - MARGIN_B,
+            ctx=ctx.with_(phase="draw-cover", cover=cover.index),
+            search_query=search_query,
+            ranking_query=ranking_query
+        )
+
+        # If the panel function couldn't draw anything (not enough space), force page break and redraw it at top
+        if y_after_panel > panel_start_y - 1:  # heuristic: no movement means no draw
+            # finish this page footer and go new page
+            draw_footer(c, page_num)
+            c.showPage()
+            page_num += 1
+            y = PAGE_H - MARGIN_T
+            # Redraw panel at top
+            y_after_panel, _ = draw_intent_ranking_block(
+                c=c,
+                y_top=y,
+                available_height=y - MARGIN_B,
+                ctx=ctx.with_(phase="draw-cover", cover=cover.index),
+                search_query=search_query,
+                ranking_query=ranking_query
+            )
+            y = y_after_panel
+        else:
+            y = y_after_panel
+
+        # Spacer before groups list
+        y -= 6
+        draw_rule(c, y + 6, COVER_RULE_GRAY)
+        y -= 10
+
         # List groups with ranks (wrapped)
         c.setFont(FONT_SANS_NAME, 11.0)
         usable_w = PAGE_W - MARGIN_L - MARGIN_R
         for g in cover.groups:
             line1 = f"• {g.filename} — ranks: {g.ranks_display}"
             if pdfmetrics.stringWidth(line1, FONT_SANS_NAME, 11.0) <= usable_w:
+                if y < MARGIN_B + 40:
+                    draw_footer(c, page_num)
+                    c.showPage()
+                    page_num += 1
+                    y = PAGE_H - MARGIN_T
+                    c.setFont(FONT_SANS_NAME, 11.0)
                 c.drawString(MARGIN_L, y, line1)
                 y -= 16
             else:
+                # word-wrapped
                 words = line1.split(" ")
                 cur = ""
                 while words:
@@ -644,18 +917,24 @@ def draw_cover_page(
                         cur = trial
                         words.pop(0)
                     else:
+                        if y < MARGIN_B + 40:
+                            draw_footer(c, page_num)
+                            c.showPage()
+                            page_num += 1
+                            y = PAGE_H - MARGIN_T
+                            c.setFont(FONT_SANS_NAME, 11.0)
                         c.drawString(MARGIN_L, y, cur)
                         y -= 15
                         cur = ""
                 if cur:
+                    if y < MARGIN_B + 40:
+                        draw_footer(c, page_num)
+                        c.showPage()
+                        page_num += 1
+                        y = PAGE_H - MARGIN_T
+                        c.setFont(FONT_SANS_NAME, 11.0)
                     c.drawString(MARGIN_L, y, cur)
                     y -= 16
-            if y < MARGIN_B + 40:
-                draw_footer(c, page_num)
-                c.showPage()
-                page_num += 1
-                y = PAGE_H - MARGIN_T
-                c.setFont(FONT_SANS_NAME, 11.0)
 
         draw_footer(c, page_num)
         return page_num
@@ -799,7 +1078,15 @@ def compute_global_relevance_total(inputs: List[GroupInput], ctx: Ctx) -> int:
         return 0
     return max(denoms)
 
-def render_book(covers: List[Cover], out_path: Path, cfg: LayoutConfig, ctx: Ctx, global_total_relevance: int) -> None:
+def render_book(
+    covers: List[Cover],
+    out_path: Path,
+    cfg: LayoutConfig,
+    ctx: Ctx,
+    global_total_relevance: int,
+    search_query: str,
+    ranking_query: str
+) -> None:
     try:
         c = rl_canvas.Canvas(str(out_path), pagesize=A4)
     except Exception as e:
@@ -817,7 +1104,9 @@ def render_book(covers: List[Cover], out_path: Path, cfg: LayoutConfig, ctx: Ctx
             page_num = draw_cover_page(
                 c, cover, cfg, page_num, ctx,
                 content_page_range=content_ranges.get(cover.index),
-                group_idx_range=group_ranges.get(cover.index)
+                group_idx_range=group_ranges.get(cover.index),
+                search_query=search_query,
+                ranking_query=ranking_query
             )
             for g in cover.groups:
                 page_num = start_new_page(c, page_num)
@@ -932,7 +1221,19 @@ def main() -> None:
             except Exception as e:
                 ctx_raise(ctx.with_(phase="mkdir", file=str(args.out.parent)), "Failed to create output directory.", "", e)
 
-        render_book(covers, args.out, cfg, ctx.with_(phase="render", file=str(args.out)), global_total_relevance=global_total)
+        # Fetch the queries (fail-loud if anything is unexpected)
+        search_query  = read_search_query(ctx.with_(phase="query"))
+        ranking_query = read_rerank_query(ctx.with_(phase="query"))
+
+        render_book(
+            covers,
+            args.out,
+            cfg,
+            ctx.with_(phase="render", file=str(args.out)),
+            global_total_relevance=global_total,
+            search_query=search_query,
+            ranking_query=ranking_query
+        )
         total_content_pages = sum(cv.pages_in_cover for cv in covers)
         print(
             f"PDF written: {args.out}  | Covers: {len(covers)}  | "
