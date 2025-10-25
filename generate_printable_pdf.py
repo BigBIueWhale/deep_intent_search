@@ -16,7 +16,7 @@ self-diagnosable without a debugger:
   instead of gray highlighter fills (better for black & white printers).
 - Title baseline aligned so “Cover N” sits exactly where intended (no half-line drift).
 - Cover shows content page range and groups range in math notation (e.g., pages [2, 21], groups [1, 7]).
-- Group pages titled as “Relevance i/Total” instead of filenames.
+ - Group pages titled by rank as “Group i/NumGroups” (the denominator is the number of adjacent groups).
 - Underlines now span through spaces for continuous emphasis.
 - Each cover page includes:
     1) The Deep Intent (search) query — read from the newest './search_runs/xxxx.jsonl' (first RS record, 'query').
@@ -1055,36 +1055,11 @@ def compute_group_index_ranges(covers: List[Cover]) -> Dict[int, Tuple[int, int]
         prior_groups += len(cv.groups)
     return ranges
 
-def compute_global_relevance_total(inputs: List[GroupInput], ctx: Ctx) -> int:
-    """
-    Scan all JSON rows across all groups, parse 'relevance_score' as 'X/Y',
-    and return a single global total Y to use in the 'Relevance i/Y' titles.
-
-    If multiple denominators are observed, we pick the maximum Y (most conservative),
-    which aligns with the typical meaning of 'out of Y'.
-    """
-    denoms: List[int] = []
-    for gi in inputs:
-        for i, r in enumerate(gi.json_rows):
-            rs = r.get("relevance_score")
-            if isinstance(rs, str):
-                try:
-                    _, d = parse_rank_strict(rs, ctx, gi.filename)
-                    denoms.append(d)
-                except Exception:
-                    # Let upstream parsing catch invalid rows during normal flow;
-                    # we skip here to keep this helper non-fatal.
-                    pass
-    if not denoms:
-        return 0
-    return max(denoms)
-
 def render_book(
     covers: List[Cover],
     out_path: Path,
     cfg: LayoutConfig,
     ctx: Ctx,
-    global_total_relevance: int,
     search_query: str,
     ranking_query: str
 ) -> None:
@@ -1097,7 +1072,7 @@ def render_book(
     content_ranges = compute_content_page_ranges(covers)
     group_ranges = compute_group_index_ranges(covers)
     total_groups = sum(len(cv.groups) for cv in covers)
-    current_group_idx = 1  # global 1-based index for "Relevance i/Total"
+    current_group_idx = 1  # global 1-based index for “Group i/NumGroups”
 
     page_num = 0
     try:
@@ -1113,11 +1088,11 @@ def render_book(
                 page_num = start_new_page(c, page_num)
                 y = PAGE_H - MARGIN_T
 
-                # Group title — now “Relevance i/Total”
+                # Group title — “Group i/NumGroups”
                 try:
                     c.setFont(FONT_SANS_NAME, 13.0)  # slightly reduced to match smaller body
-                    denom_for_title = global_total_relevance if global_total_relevance > 0 else total_groups
-                    title_txt = f"Relevance {current_group_idx}/{denom_for_title}"
+                    denom_for_title = max(1, total_groups)
+                    title_txt = f"Group {current_group_idx}/{denom_for_title}"
                     c.drawString(MARGIN_L, y - cfg.leading_body * 0.9, title_txt)
                     draw_rule(c, y - cfg.leading_body * 1.05)
                     y -= (cfg.leading_body * 1.4)
@@ -1192,20 +1167,18 @@ def main() -> None:
         inputs: List[GroupInput] = []
         for p in files:
             inputs.append(parse_one_yellow_file(p, ctx.with_(phase="parse", file=p.name)))
-
-        # Compute global denominator for "Relevance i/Total" titles
-        global_total = compute_global_relevance_total(inputs, ctx.with_(phase="parse"))
-
         prepared: List[GroupPrepared] = []
         for gi in inputs:
             rows2, ranks_disp, rel_count = massage_json_rows_keep_top_evidence(gi.json_rows, ctx, gi.filename)
-            prepared.append(GroupPrepared(
-                filename=gi.filename,
-                json_rows=rows2,
-                text=gi.text,
-                ranks_display=ranks_disp,
-                relevant_count=rel_count,
-            ))
+            prepared.append(
+                GroupPrepared(
+                    filename=gi.filename,
+                    json_rows=rows2,
+                    text=gi.text,
+                    ranks_display=ranks_disp,
+                    relevant_count=rel_count,
+                )
+            )
 
         cfg = LayoutConfig(
             body_size=args.body_size,
@@ -1231,7 +1204,6 @@ def main() -> None:
             args.out,
             cfg,
             ctx.with_(phase="render", file=str(args.out)),
-            global_total_relevance=global_total,
             search_query=search_query,
             ranking_query=ranking_query
         )
