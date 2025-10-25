@@ -50,6 +50,8 @@ PRETTY_DIR: Path = Path("./pretty")
 RUN_FILE_RE: re.Pattern[str] = re.compile(r"^(?P<run>\d{4})\.jsonl$")
 FILENAME_RE: re.Pattern[str] = re.compile(r"^(?P<num>\d+)\.txt$")
 
+MAX_CHUNKS_TO_ASK_LLM_TO_REWRITE = 5
+
 # ---- LLM integration ----
 from dotenv import load_dotenv
 from core.llm import get_client, chat_complete, print_stats
@@ -237,7 +239,7 @@ def join_unique(items: Sequence[str]) -> str:
             out.append(s)
     return " | ".join(out)
 
-def split_evenly(group: List[str], max_per_sub: int = 5) -> List[List[str]]:
+def split_evenly(group: List[str], max_per_sub: int = MAX_CHUNKS_TO_ASK_LLM_TO_REWRITE) -> List[List[str]]:
     n = len(group)
     if n == 0:
         return []
@@ -454,7 +456,7 @@ def main() -> None:
         assembled = assemble_group_with_context(group)
 
         # LLM cleaning
-        if len(group) < 6:
+        if len(group) <= MAX_CHUNKS_TO_ASK_LLM_TO_REWRITE:
             codeblock = llm_clean_to_codeblock(assembled.concat_text)
         else:
             sub_groups = split_evenly(group)
