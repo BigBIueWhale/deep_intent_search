@@ -2,10 +2,6 @@
 """
 collect_transform_pretty.py
 
-Rewrite of the printer to produce *printable* monolithic text per adjacent group,
-while preserving strict validation, ordering, and context rules from
-collect_search_results.py — plus resumability.
-
 Output per adjacent group → ./pretty/000001.txt, 000002.txt, ...
 Each file begins with a pretty-printed JSON list of objects (one per RELEVANT
 section in the group), then a blank line, then the full cleaned, continuous
@@ -241,6 +237,22 @@ def join_unique(items: Sequence[str]) -> str:
             out.append(s)
     return " | ".join(out)
 
+def split_evenly(group: List[str], max_per_sub: int = 5) -> List[List[str]]:
+    n = len(group)
+    if n == 0:
+        return []
+    num_subs = (n + max_per_sub - 1) // max_per_sub
+    base = n // num_subs
+    rem = n % num_subs
+    subs: List[List[str]] = []
+    start = 0
+    for i in range(num_subs):
+        size = base + 1 if i < rem else base
+        sub = group[start:start + size]
+        subs.append(sub)
+        start += size
+    return subs
+
 # --------------- LLM cleaning ---------------
 _CLEAN_PROMPT_TEMPLATE = (
     "You're a text cleaner.\n"
@@ -263,7 +275,7 @@ _CLEAN_PROMPT_TEMPLATE = (
 
 _CODEBLOCK_RE = re.compile(r"```(?:txt)?\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
 
-def llm_clean_to_codeblock(raw: str, max_retries: int = 6) -> Tuple[str, int]:
+def llm_clean_to_codeblock(raw: str, max_retries: int = 6) -> str:
     if not CLIENT:
         raise RuntimeError("LLM client not initialized")
 
@@ -442,7 +454,41 @@ def main() -> None:
         assembled = assemble_group_with_context(group)
 
         # LLM cleaning
-        codeblock = llm_clean_to_codeblock(assembled.concat_text)
+        if len(group) < 6:
+            codeblock = llm_clean_to_codeblock(assembled.concat_text)
+        else:
+            sub_groups = split_evenly(group)
+            cleaned_parts: List[str] = []
+            first_pf = parse_filename_strict(group[0])
+            last_pf = parse_filename_strict(group[-1])
+            before_name = first_pf.format(first_pf.num - 1) if first_pf.num > 0 else None
+            has_before = before_name is not None and (CHUNKS_DIR / before_name).is_file() if before_name else False
+            after_name = last_pf.format(last_pf.num + 1)
+            has_after = (CHUNKS_DIR / after_name).is_file()
+            for s_i, sub in enumerate(sub_groups):
+                sub_members: List[str] = []
+                if s_i == 0 and has_before:
+                    sub_members.append(before_name)  # type: ignore
+                sub_members.extend(sub)
+                if s_i == len(sub_groups) - 1 and has_after:
+                    sub_members.append(after_name)
+                sub_pieces: List[str] = []
+                for fn in sub_members:
+                    raw = read_chunk_text_strict(fn)
+                    if "\n" in raw:
+                        _, rest = raw.split("\n", 1)
+                    else:
+                        _, rest = raw, ""
+                    sub_pieces.append(rest)
+                sub_concat = "".join(sub_pieces)
+                sub_codeblock = llm_clean_to_codeblock(sub_concat)
+                m = _CODEBLOCK_RE.search(sub_codeblock)
+                if not m:
+                    raise ValueError("Failed to extract inner text from sub codeblock")
+                inner = m.group(1)
+                cleaned_parts.append(inner)
+            full_cleaned = " ".join(cleaned_parts)
+            codeblock = f"```txt\n{full_cleaned}\n```"
 
         # Build per-relevant JSON list
         rows: List[dict] = []

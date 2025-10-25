@@ -55,6 +55,7 @@ PRETTY_NAME_RE = re.compile(r"^(\d{6})\.txt$")
 # ---- LLM integration (same core as other project files) ----
 from dotenv import load_dotenv
 from core.llm import get_client, chat_complete, print_stats
+from core.tokens import count_tokens
 
 load_dotenv()
 CLIENT = get_client()
@@ -195,21 +196,13 @@ USER_PROMPT_TEMPLATE = (
     "* OUTPUT REQUIREMENT: Return exactly one markdown code block (language tag: txt) that contains the full TEXT (with your tag insertions). No other text before or after.\n\n"
     "SEARCH_INTENT (verbatim):\n"
     "{SEARCH_INTENT}\n\n"
+    "KEY EVIDENCE (from the highest relevance section in this group):\n{EVIDENCE}\n\n"
+    "Use this evidence to help identify and highlight the matching parts. Based on the evidence, there is definitely relevant content here—make sure to highlight it.\n\n"
     "TEXT (the entire input to be highlighted appears below inside a markdown code block, language tag: txt):\n"
     "{TEXT_CODEBLOCK}\n\n"
     "Now return exactly one markdown code block (language tag: txt) that contains the full TEXT with <mark-yellow>…</mark-yellow> inserted around the relevant portion. No commentary or extra lines outside the code block."
 )
 
-def ensure_single_txt_codeblock(s: str) -> Optional[str]:
-    m = CODEBLOCK_RE.search(s)
-    if not m:
-        return None
-    # Ensure there is exactly one block
-    if len(CODEBLOCK_RE.findall(s)) != 1:
-        return None
-    return m.group(0)
-
-# --- Yellow-tag validation helpers (opening/closing, no nesting) ---
 TAG_OPEN = "<mark-yellow>"
 TAG_CLOSE = "</mark-yellow>"
 TAG_ANY_RE = re.compile(r"</?mark-yellow>")
@@ -244,19 +237,24 @@ def validate_yellow_tags(text: str) -> Tuple[bool, str]:
         return (False, "Malformed <mark-yellow> tag variant detected.")
     return (True, "")
 
-def run_llm_highlight(text_inner: str, search_intent: str, max_retries: int = 8) -> str:
-    """
-    Send the *exact* prompts. Require exactly one ```txt code block.
-    Also ensure returned length >= input length (or equal).
-    Additionally validate yellow tags pairing and structure; retry if invalid.
-    """
+def ensure_single_txt_codeblock(s: str) -> Optional[str]:
+    m = CODEBLOCK_RE.search(s)
+    if not m:
+        return None
+    # Ensure there is exactly one block
+    if len(CODEBLOCK_RE.findall(s)) != 1:
+        return None
+    return m.group(0)
+
+def _llm_highlight_single(text: str, search_intent: str, evidence: str, max_retries: int = 8) -> str:
     if not CLIENT:
         raise RuntimeError("LLM client not initialized (get_client() returned None).")
 
     # Construct the user content including the TEXT as a code block with language tag txt
-    text_codeblock = f"```txt\n{text_inner}\n```"
+    text_codeblock = f"```txt\n{text}\n```"
     user_content = USER_PROMPT_TEMPLATE.format(
         SEARCH_INTENT=search_intent,
+        EVIDENCE=evidence,
         TEXT_CODEBLOCK=text_codeblock
     )
 
@@ -314,6 +312,46 @@ def run_llm_highlight(text_inner: str, search_intent: str, max_retries: int = 8)
             print(f"Retry {attempt}/{max_retries}: {last_err}")
 
     raise RuntimeError(f"LLM failed to produce a valid single txt code block after {max_retries} attempts. Last error: {last_err}")
+
+def split_text_evenly(text: str, num_parts: int) -> List[str]:
+    if num_parts <= 1:
+        return [text]
+    approx_char = len(text) // num_parts
+    parts: List[str] = []
+    start = 0
+    for _ in range(num_parts - 1):
+        end = start + approx_char
+        # Find the nearest newline after the approx end, to avoid splitting mid-line
+        newline_pos = text.find('\n', end)
+        if newline_pos == -1:
+            newline_pos = len(text)  # If no more newlines, take the rest
+        else:
+            newline_pos += 1  # Include the newline in the current part
+        parts.append(text[start:newline_pos])
+        start = newline_pos
+    parts.append(text[start:])
+    return parts
+
+def run_llm_highlight(text_inner: str, search_intent: str, evidence: str, max_retries: int = 8) -> str:
+    tokens = count_tokens(text_inner)
+    threshold = 6000
+    if tokens < threshold:
+        return _llm_highlight_single(text_inner, search_intent, evidence, max_retries)
+    else:
+        # Ironically, we're performing a split action after we already had a split, but that's what's required
+        # since we lost all split information after passing through the prettyfier.
+        num_parts = (tokens + 4999) // 5000
+        parts = split_text_evenly(text_inner, num_parts)
+        highlighted_inners: List[str] = []
+        for part in parts:
+            block_part = _llm_highlight_single(part, search_intent, evidence, max_retries)
+            m = CODEBLOCK_RE.search(block_part)
+            if not m:
+                raise ValueError("Failed to extract inner from part block")
+            inner_part = m.group(1)
+            highlighted_inners.append(inner_part)
+        full_inner = "".join(highlighted_inners)
+        return f"```txt\n{full_inner}\n```"
 
 
 # ---------- Resumability ----------
@@ -376,9 +414,17 @@ def main() -> None:
         raw = read_text_strict(in_path)
         parsed = parse_pretty_file_strict(raw, in_path.name)
 
-        # Build the prompting TEXT code block exactly as received (we do not trim or normalize)
+        # Extract evidence from the highest relevancy chunk
+        json_data = json.loads(parsed.json_prefix.strip())
+        min_rank = min(int(row["relevance_score"].split("/")[0]) for row in json_data)
+        evidence = ""
+        for row in json_data:
+            if int(row["relevance_score"].split("/")[0]) == min_rank:
+                evidence = row["evidence_text"]
+                break
+
         # Run LLM (with strong retry discipline)
-        highlighted_block = run_llm_highlight(parsed.codeblock_inner, search_intent)
+        highlighted_block = run_llm_highlight(parsed.codeblock_inner, search_intent, evidence)
 
         # Compose output: keep JSON prefix exactly as-is, then append the new code block.
         # We do not touch the prefix newlines; we simply replace the block and add a final newline for POSIX hygiene.

@@ -52,7 +52,7 @@ Instead of overselling relevance, the model "performs" by writing a high-quality
 5. [yellow_marker.py](./yellow_marker.py)
     - **Input:**
       1. [./pretty/000001.txt](./pretty/000001.txt) (and `000002.txt` etc)
-      2. Newest `search_runs/xxxx.jsonl`- take "query" from first line of jsonl
+      2. Newest `search_runs/xxxx.jsonl`- take "query" from first line of jsonl, and use "evidence" as a hint for highlighting purposes.
     - **Final output:** [./yellow_marker/000001.txt](./pretty/000001.txt) (and `000002.txt` etc)
 6. [generate_printable_pdf.py](./generate_printable_pdf.py)
     - **Input:**
