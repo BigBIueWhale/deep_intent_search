@@ -281,7 +281,7 @@ def _supports_thinking(model: str) -> bool:
     return model in {
         "qwen3:32b",
         "qwen3:30b-a3b-thinking-2507-q4_K_M",
-        "qwen3-vl-32b-thinking",
+        "qwen3-vl:32b-thinking",
     }
 
 def _supports_qwen3_hybrid(model: str) -> bool:

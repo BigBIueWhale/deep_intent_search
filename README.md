@@ -82,8 +82,8 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 # Model selection (required)
 # You must set both variables explicitly. There is no fallback.
 # Allowed values:
-#   - qwen3-vl-32b-instruct
-#   - qwen3-vl-32b-thinking
+#   - qwen3-vl:32b-instruct
+#   - qwen3-vl:32b-thinking
 #   - qwen3:32b
 #   - qwen3:30b-a3b-thinking-2507-q4_K_M
 #   - qwen3:30b-a3b-instruct-2507-q4_K_M
