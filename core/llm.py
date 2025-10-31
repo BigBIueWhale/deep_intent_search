@@ -194,28 +194,64 @@ _GEMMA3_27B_OPTIONS = {
     "num_predict": 8192,
 }
 
+_QWEN3_VL_32B_BASE_OPTIONS = {
+    # Good context length value for 32GB VRAM and flash attention enabled
+    # Ends up using ~31 GB in "ollama ps" when context length is full.
+    "num_ctx": 19456,  # 19k
+
+    # Setting -1 (infinite) would cause infinite generation once in a while.
+    # Infinite generations are observed to be exactly 239,998 thinking tokens
+    # plus 2 response tokens.
+    # Avoid the issue of Ollama call getting stuck waiting for almost 2 hours,
+    # grinding the GPU for nothing on gibberish.
+    "num_predict": 11264,
+
+    # Layers to offload, all of them.
+    "num_gpu": 65,
+}
+
+# Recommended: https://huggingface.co/Qwen/Qwen3-VL-32B-Instruct#text
+_QWEN3_VL_32B_INSTRUCT_TEXT_ONLY_OPTIONS = {
+    **_QWEN3_VL_32B_BASE_OPTIONS,
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "top_k": 40,
+    "min_p": 0.0,
+    "presence_penalty": 2.0,
+    "repeat_penalty": 1.0,
+}
+
+# Recommended: https://huggingface.co/Qwen/Qwen3-VL-32B-Instruct#vl
+_QWEN3_VL_32B_INSTRUCT_VL_OPTIONS = {
+    **_QWEN3_VL_32B_BASE_OPTIONS,
+    "temperature": 0.7,
+    "top_p": 0.8,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 1.5,
+    "repeat_penalty": 1.0,
+}
+
+# Recommended: https://huggingface.co/Qwen/Qwen3-VL-32B-Thinking#text
 _QWEN3_VL_32B_THINKING_TEXT_ONLY_OPTIONS = {
-    "temperature": 0.6,
+    **_QWEN3_VL_32B_BASE_OPTIONS,
+    "temperature": 1.0,
     "top_p": 0.95,
     "top_k": 20,
     "min_p": 0.0,
     "presence_penalty": 1.5,
     "repeat_penalty": 1.0,
-    "num_ctx": 19456,
-    "num_predict": 11264,
-    "num_gpu": 65,
 }
 
+# Recommended: https://huggingface.co/Qwen/Qwen3-VL-32B-Thinking#vl
 _QWEN3_VL_32B_THINKING_VL_OPTIONS = {
-    "temperature": 0.6,
+    **_QWEN3_VL_32B_BASE_OPTIONS,
+    "temperature": 1.0,
     "top_p": 0.95,
     "top_k": 20,
     "min_p": 0.0,
     "presence_penalty": 0.0,
     "repeat_penalty": 1.0,
-    "num_ctx": 19456,
-    "num_predict": 11264,
-    "num_gpu": 65,
 }
 
 def get_ollama_options(model: str, please_no_thinking: bool, has_images: bool = False) -> dict:
@@ -235,6 +271,8 @@ def get_ollama_options(model: str, please_no_thinking: bool, has_images: bool = 
         return dict(_GEMMA3_27B_OPTIONS)
     if model == "qwen3-vl-32b-thinking":
         return dict(_QWEN3_VL_32B_THINKING_VL_OPTIONS) if has_images else dict(_QWEN3_VL_32B_THINKING_TEXT_ONLY_OPTIONS)
+    if model == "qwen3-vl-32b-instruct":
+        return dict(_QWEN3_VL_32B_INSTRUCT_VL_OPTIONS) if has_images else dict(_QWEN3_VL_32B_INSTRUCT_TEXT_ONLY_OPTIONS)
     raise ValueError(
         f"Unrecognized OLLAMA_MODEL '{model}'. See README for .env options"
     )
@@ -296,7 +334,7 @@ def chat_complete(
     is_hybrid = _supports_qwen3_hybrid(model)
 
     has_images = False
-    if model == "qwen3-vl-32b-thinking":
+    if "qwen3-vl" in model:
         has_images = any(
             "images_b64" in m and isinstance(m.get("images_b64"), list) and m["images_b64"]
             for m in messages
@@ -315,7 +353,7 @@ def chat_complete(
         options["num_predict"] = max_completion_tokens
 
     payload_messages = copy.deepcopy(messages)
-    if model == "qwen3-vl-32b-thinking":
+    if "qwen3-vl" in model:
         for msg in payload_messages:
             if "images_b64" in msg:
                 msg["images"] = msg.pop("images_b64")

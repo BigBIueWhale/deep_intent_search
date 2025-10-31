@@ -82,12 +82,13 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 # Model selection (required)
 # You must set both variables explicitly. There is no fallback.
 # Allowed values:
+#   - qwen3-vl-32b-instruct
+#   - qwen3-vl-32b-thinking
 #   - qwen3:32b
 #   - qwen3:30b-a3b-thinking-2507-q4_K_M
 #   - qwen3:30b-a3b-instruct-2507-q4_K_M
 #   - JollyLlama/GLM-4-32B-0414-Q4_K_M
 #   - gemma3:27b
-#   - qwen3-vl-32b-thinking
 #
 # Usage:
 #   - OLLAMA_MODEL_JUDGE is used by deep_search.py (relevance judging)
@@ -98,6 +99,7 @@ OLLAMA_MODEL_SPLITTER=qwen3:32b
 
 > Pull models once:
 > ```bash
+> ollama pull qwen3-vl:32b-instruct
 > ollama pull qwen3-vl:32b-thinking
 > ollama pull qwen3:32b
 > ollama pull qwen3:30b-a3b-thinking-2507-q4_K_M
