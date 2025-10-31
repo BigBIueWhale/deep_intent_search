@@ -194,7 +194,7 @@ _GEMMA3_27B_OPTIONS = {
     "num_predict": 8192,
 }
 
-_QWEN3_VL_32B_TEXT_ONLY_OPTIONS = {
+_QWEN3_VL_32B_THINKING_TEXT_ONLY_OPTIONS = {
     "temperature": 0.6,
     "top_p": 0.95,
     "top_k": 20,
@@ -206,7 +206,7 @@ _QWEN3_VL_32B_TEXT_ONLY_OPTIONS = {
     "num_gpu": 65,
 }
 
-_QWEN3_VL_32B_VL_OPTIONS = {
+_QWEN3_VL_32B_THINKING_VL_OPTIONS = {
     "temperature": 0.6,
     "top_p": 0.95,
     "top_k": 20,
@@ -234,7 +234,7 @@ def get_ollama_options(model: str, please_no_thinking: bool, has_images: bool = 
     if model == "gemma3:27b":
         return dict(_GEMMA3_27B_OPTIONS)
     if model == "qwen3-vl-32b-thinking":
-        return dict(_QWEN3_VL_32B_VL_OPTIONS) if has_images else dict(_QWEN3_VL_32B_TEXT_ONLY_OPTIONS)
+        return dict(_QWEN3_VL_32B_THINKING_VL_OPTIONS) if has_images else dict(_QWEN3_VL_32B_THINKING_TEXT_ONLY_OPTIONS)
     raise ValueError(
         f"Unrecognized OLLAMA_MODEL '{model}'. See README for .env options"
     )
