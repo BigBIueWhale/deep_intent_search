@@ -5,6 +5,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
+import copy
 
 import httpx
 from dotenv import load_dotenv
@@ -193,7 +194,31 @@ _GEMMA3_27B_OPTIONS = {
     "num_predict": 8192,
 }
 
-def get_ollama_options(model: str, please_no_thinking: bool) -> dict:
+_QWEN3_VL_32B_TEXT_ONLY_OPTIONS = {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 1.5,
+    "repeat_penalty": 1.0,
+    "num_ctx": 19456,
+    "num_predict": 11264,
+    "num_gpu": 65,
+}
+
+_QWEN3_VL_32B_VL_OPTIONS = {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repeat_penalty": 1.0,
+    "num_ctx": 19456,
+    "num_predict": 11264,
+    "num_gpu": 65,
+}
+
+def get_ollama_options(model: str, please_no_thinking: bool, has_images: bool = False) -> dict:
     if model == "qwen3:32b":
         return dict(
             _QWEN3_32B_NO_THINK_OPTIONS
@@ -208,6 +233,8 @@ def get_ollama_options(model: str, please_no_thinking: bool) -> dict:
         return dict(_GLM_4_32B_OPTIONS)
     if model == "gemma3:27b":
         return dict(_GEMMA3_27B_OPTIONS)
+    if model == "qwen3-vl-32b-thinking":
+        return dict(_QWEN3_VL_32B_VL_OPTIONS) if has_images else dict(_QWEN3_VL_32B_TEXT_ONLY_OPTIONS)
     raise ValueError(
         f"Unrecognized OLLAMA_MODEL '{model}'. See README for .env options"
     )
@@ -216,6 +243,7 @@ def _supports_thinking(model: str) -> bool:
     return model in {
         "qwen3:32b",
         "qwen3:30b-a3b-thinking-2507-q4_K_M",
+        "qwen3-vl-32b-thinking",
     }
 
 def _supports_qwen3_hybrid(model: str) -> bool:
@@ -246,7 +274,7 @@ def _extract_thinking(message_obj: dict, can_think: bool, content: str) -> Optio
 
 
 def chat_complete(
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     role: str,
     client: httpx.Client,
     max_completion_tokens: int, # Only used in non-thinking mode
@@ -264,9 +292,17 @@ def chat_complete(
         raise RuntimeError("httpx client is not initialized")
 
     model = get_model_name(role)
-    options = get_ollama_options(model, please_no_thinking)
     can_think = _supports_thinking(model)
     is_hybrid = _supports_qwen3_hybrid(model)
+
+    has_images = False
+    if model == "qwen3-vl-32b-thinking":
+        has_images = any(
+            "images_b64" in m and isinstance(m.get("images_b64"), list) and m["images_b64"]
+            for m in messages
+        )
+
+    options = get_ollama_options(model, please_no_thinking, has_images=has_images)
 
     hybrid_nothink_switch = is_hybrid and please_no_thinking
 
@@ -278,9 +314,15 @@ def chat_complete(
     if hybrid_nothink_switch or not can_think:
         options["num_predict"] = max_completion_tokens
 
+    payload_messages = copy.deepcopy(messages)
+    if model == "qwen3-vl-32b-thinking":
+        for msg in payload_messages:
+            if "images_b64" in msg:
+                msg["images"] = msg.pop("images_b64")
+
     payload: dict[str, Any] = {
         "model": model,
-        "messages": messages,
+        "messages": payload_messages,
         "options": options,
         "stream": False,
     }

@@ -87,6 +87,7 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 #   - qwen3:30b-a3b-instruct-2507-q4_K_M
 #   - JollyLlama/GLM-4-32B-0414-Q4_K_M
 #   - gemma3:27b
+#   - qwen3-vl-32b-thinking
 #
 # Usage:
 #   - OLLAMA_MODEL_JUDGE is used by deep_search.py (relevance judging)
