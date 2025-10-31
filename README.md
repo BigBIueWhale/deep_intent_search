@@ -97,6 +97,7 @@ OLLAMA_MODEL_SPLITTER=qwen3:32b
 
 > Pull models once:
 > ```bash
+> ollama pull qwen3-vl:32b-thinking
 > ollama pull qwen3:32b
 > ollama pull qwen3:30b-a3b-thinking-2507-q4_K_M
 > ollama pull qwen3:30b-a3b-instruct-2507-q4_K_M
