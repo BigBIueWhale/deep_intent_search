@@ -93,7 +93,7 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 # Usage:
 #   - OLLAMA_MODEL_JUDGE is used by deep_search.py (relevance judging)
 #   - OLLAMA_MODEL_SPLITTER is used by semantic_splitter.py (chunk boundary finder)
-OLLAMA_MODEL_JUDGE=qwen3:32b
+OLLAMA_MODEL_JUDGE=qwen3-vl:32b-instruct
 OLLAMA_MODEL_SPLITTER=qwen3:32b
 ```
 
@@ -111,6 +111,10 @@ OLLAMA_MODEL_SPLITTER=qwen3:32b
 The LLM is called with the metaparameters described in [./core/llm.py](./core/llm.py) on **every request**
 
 ## Per-model options
+
+- `qwen3-vl:32b-instruct`- Recommended for all judgement tasks. Seems to have avoided the issue that plagued the non-thinking version of `qwen3:32b`- namely getting confused between sections. Definitely seems to find more results than `qwen3:32b` (with thinking), which is incredible! Definitely faster too (obviously, because it's non-thinking).
+
+- `qwen3-vl:32b-thinking`- Thinks at least twice as much as `qwen3:32b`. Definitely smarter, but dangerous due to its high VRAM consumption (all those thinking tokens require us to increase context length).
 
 - `qwen3:32b` is highly recommended for all tasks in this project. In its `/no_think` variable, it's a model of average reliability, probably even less reliable than `qwen3:30b-a3b-instruct-2507-q4_K_M`. But, since it's a hybrid reasoning model- upon multiple consecurive failures in [semantic_splitter.py](./semantic_splitter.py) we simply turn on thinking mode on the fly! Without having to unload and then load a different model into VRAM!
 

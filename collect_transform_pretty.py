@@ -290,7 +290,7 @@ def llm_clean_to_codeblock(raw: str, max_retries: int = 6) -> str:
         try:
             resp = chat_complete(
                 messages=messages,
-                role="splitter",            # same family used elsewhere; thinking OK
+                role="judge",
                 client=CLIENT,
                 max_completion_tokens=16384,
                 please_no_thinking=False,    # turn ON thinking for reliability

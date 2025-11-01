@@ -268,7 +268,7 @@ def _llm_highlight_single(text: str, search_intent: str, evidence: str, max_retr
         try:
             resp = chat_complete(
                 messages=messages,
-                role="splitter",            # consistent with other scripts; thinking allowed
+                role="judge",
                 client=CLIENT,
                 max_completion_tokens=16384,
                 please_no_thinking=False,
