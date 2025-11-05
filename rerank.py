@@ -701,7 +701,7 @@ def run_bracketing(j: Journal, items: List[Item], query: str, client, skeleton_o
         # We collect up to BRACKET_CONFIRMATION votes per side when available
         def confirm_against(bound_idx: int, expect_x_above: bool) -> int:
             """Return +1 if result supports 'x above boundary' hypothesis, else -1."""
-            nonlocal confirms_ct
+            nonlocal confirms_ct, current_bracket
             if bound_idx < 0 or bound_idx >= S:
                 return 0
             y = id2item[skeleton_order[bound_idx]]
