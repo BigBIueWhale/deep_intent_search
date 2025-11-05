@@ -183,21 +183,19 @@ SYSTEM_PROMPT = (
 )
 
 USER_PROMPT_TEMPLATE = (
-    "You are a highlighter. Insert <mark-yellow> and </mark-yellow> around portions of TEXT that are relevant to the SEARCH_INTENT. "
-    "The provided TEXT does contain material relevant to the query; your job is to precisely identify and tag those parts. "
+    "You are a highlighter. Insert <mark-yellow> and </mark-yellow> around portions of TEXT that are relevant to the SEARCH_INTENT."
+    "The provided TEXT does contain material relevant to the query; your job is to precisely identify and tag those parts."
     "Prefer several small, precise highlights over one large span when that better captures relevance. Do not alter any characters except for inserting these tags.\n\n"
     "RULES:\n"
-    "* Span size: choose whatever unit best captures the relevant material—phrase, sentence, paragraph—adding surrounding words only if needed for coherence.\n"
+    "* Span sizes: mark just enough word (or sentences) in the text so that if a user were to read only the yellow marked portions, they will have a full picture of the aspects of the text relevant to their query.\n"
     "* Multiple markers are encouraged when distinct relevant snippets exist; wrap each with its own <mark-yellow>…</mark-yellow> pair.\n"
     "* Tags must be properly paired with opening and closing tags and must NOT be nested.\n"
-    "* Operate ONLY on the TEXT provided below inside a markdown code block (language tag: txt).\n"
-    "* Keep original characters, order, spacing, punctuation, and Unicode exactly as-is (only add the tags).\n"
-    "* If nothing is relevant, return the TEXT unchanged.\n"
+    "* Operate ONLY on the TEXT provided below inside a markdown code block (language tag: txt). Don't include evidence keys or anything extra besides the rewritten TEXT in your response.\n"
+    "* Keep original characters, order, spacing, punctuation, and Unicode in TEXT exactly as-is (only add the tags).\n"
     "* OUTPUT REQUIREMENT: Return exactly one markdown code block (language tag: txt) that contains the full TEXT (with your tag insertions). No other text before or after.\n\n"
     "SEARCH_INTENT (verbatim):\n"
     "{SEARCH_INTENT}\n\n"
-    "KEY EVIDENCE (from the highest relevance section in this group):\n{EVIDENCE}\n\n"
-    "Use this evidence to help identify and highlight the matching parts. Based on the evidence, there is definitely relevant content here—make sure to highlight it.\n\n"
+    "{EVIDENCE_SECTION}\n\n"
     "TEXT (the entire input to be highlighted appears below inside a markdown code block, language tag: txt):\n"
     "{TEXT_CODEBLOCK}\n\n"
     "Now return exactly one markdown code block (language tag: txt) that contains the full TEXT with <mark-yellow>…</mark-yellow> inserted around the relevant portion. No commentary or extra lines outside the code block."
@@ -246,7 +244,7 @@ def ensure_single_txt_codeblock(s: str) -> Optional[str]:
         return None
     return m.group(0)
 
-def _llm_highlight_single(text: str, search_intent: str, evidence: str, max_retries: int = 8) -> str:
+def _llm_highlight_single(text: str, search_intent: str, evidence_section: str, max_retries: int = 8) -> str:
     if not CLIENT:
         raise RuntimeError("LLM client not initialized (get_client() returned None).")
 
@@ -254,7 +252,7 @@ def _llm_highlight_single(text: str, search_intent: str, evidence: str, max_retr
     text_codeblock = f"```txt\n{text}\n```"
     user_content = USER_PROMPT_TEMPLATE.format(
         SEARCH_INTENT=search_intent,
-        EVIDENCE=evidence,
+        EVIDENCE_SECTION=evidence_section,
         TEXT_CODEBLOCK=text_codeblock
     )
 
@@ -332,11 +330,11 @@ def split_text_evenly(text: str, num_parts: int) -> List[str]:
     parts.append(text[start:])
     return parts
 
-def run_llm_highlight(text_inner: str, search_intent: str, evidence: str, max_retries: int = 8) -> str:
+def run_llm_highlight(text_inner: str, search_intent: str, evidence_section: str, max_retries: int = 8) -> str:
     tokens = count_tokens(text_inner)
     threshold = 6000
     if tokens < threshold:
-        return _llm_highlight_single(text_inner, search_intent, evidence, max_retries)
+        return _llm_highlight_single(text_inner, search_intent, evidence_section, max_retries)
     else:
         # Ironically, we're performing a split action after we already had a split, but that's what's required
         # since we lost all split information after passing through the prettyfier.
@@ -344,7 +342,7 @@ def run_llm_highlight(text_inner: str, search_intent: str, evidence: str, max_re
         parts = split_text_evenly(text_inner, num_parts)
         highlighted_inners: List[str] = []
         for part in parts:
-            block_part = _llm_highlight_single(part, search_intent, evidence, max_retries)
+            block_part = _llm_highlight_single(part, search_intent, evidence_section, max_retries)
             m = CODEBLOCK_RE.search(block_part)
             if not m:
                 raise ValueError("Failed to extract inner from part block")
@@ -416,15 +414,22 @@ def main() -> None:
 
         # Extract evidence from the highest relevancy chunk
         json_data = json.loads(parsed.json_prefix.strip())
-        min_rank = min(int(row["relevance_score"].split("/")[0]) for row in json_data)
-        evidence = ""
-        for row in json_data:
-            if int(row["relevance_score"].split("/")[0]) == min_rank:
-                evidence = row["evidence_text"]
-                break
+        evidences = [row["evidence_text"] for row in json_data]
+        if len(evidences) == 1:
+            evidence_section = (
+                f"KEY EVIDENCE:\n{evidences[0]}\n\n"
+                "Use this evidence to help identify and highlight the matching parts. Based on the evidence, there is definitely relevant content here—make sure to highlight it."
+            )
+        else:
+            evidence_chunks = "\n".join(f"Chunk {i+1}: {ev}" for i, ev in enumerate(evidences))
+            evidence_section = (
+                f"KEY EVIDENCE (from the multiple relevant sections in this group):\n\n"
+                f"This group is made up of multiple chunks, and the TEXT is a concatenation of these chunks. Here are the evidence texts for each chunk:\n{evidence_chunks}\n\n"
+                "Use these evidences to help identify and highlight the matching parts in the corresponding portions of the TEXT. Based on the evidences, there is definitely relevant content here—make sure to highlight it."
+            )
 
         # Run LLM (with strong retry discipline)
-        highlighted_block = run_llm_highlight(parsed.codeblock_inner, search_intent, evidence)
+        highlighted_block = run_llm_highlight(parsed.codeblock_inner, search_intent, evidence_section)
 
         # Compose output: keep JSON prefix exactly as-is, then append the new code block.
         # We do not touch the prefix newlines; we simply replace the block and add a final newline for POSIX hygiene.
