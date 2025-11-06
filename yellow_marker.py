@@ -266,7 +266,7 @@ def _llm_highlight_single(text: str, search_intent: str, evidence_section: str, 
         try:
             resp = chat_complete(
                 messages=messages,
-                role="judge",
+                role="splitter",
                 client=CLIENT,
                 max_completion_tokens=16384,
                 please_no_thinking=False,
