@@ -290,6 +290,7 @@ def llm_clean_to_codeblock(raw: str, max_retries: int = 6) -> str:
         try:
             resp = chat_complete(
                 messages=messages,
+                # We have no way to verify, so we have to use highest quality LLM
                 role="highest_quality",
                 client=CLIENT,
                 max_completion_tokens=16384,
