@@ -2,7 +2,6 @@
 
 import os
 import re
-import time
 from dataclasses import dataclass
 from typing import Any, Optional
 import copy
@@ -82,20 +81,25 @@ def get_client() -> httpx.Client | None:
         return client
     except Exception as e:
         raise RuntimeError(f"Error initializing httpx client for Ollama at {_base_url()}: {e}")
-    
-def get_model_name(role: str | None = None) -> str:
-    """
-    Role must be 'judge' or 'splitter'. No fallback. Force explicit config.
-    """
-    if role not in {"judge", "splitter"}:
-        raise ValueError("get_model_name(role): role must be 'judge' or 'splitter'.")
 
-    env_key = "OLLAMA_MODEL_JUDGE" if role == "judge" else "OLLAMA_MODEL_SPLITTER"
-    name = os.environ.get(env_key, "").strip()
-    if not name:
-        raise ValueError(f"Missing required env var {env_key}. See README for .env options")
-    
-    return name
+def get_model_name(role: str | None = None) -> str:
+    roles = {
+        "judge": ["OLLAMA_MODEL_JUDGE", "OLLAMA_MODEL_HIGHEST_QUALITY"],
+        "splitter": ["OLLAMA_MODEL_SPLITTER", "OLLAMA_MODEL_HIGHEST_QUALITY"],
+        "highest_quality": ["OLLAMA_MODEL_HIGHEST_QUALITY"],
+    }
+
+    allowed = ", ".join(sorted(roles))
+    if role not in roles:
+        raise ValueError(f"get_model_name(role): role must be one of: {allowed}.")
+
+    for key in roles[role]:
+        val = os.environ.get(key, "").strip()
+        if val:
+            return val
+
+    tried = ", ".join(roles[role])
+    raise ValueError(f"Missing required env var(s): {tried}. See README for .env options.")
 
 # Advanced parameters for qwen3:32b, applied on every request.
 # Shared across think & no-think.
