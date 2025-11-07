@@ -1,0 +1,15 @@
+# Ran this deep_search.py command three times with the same query, to eliminate wobbly results
+# Used Qwen3-32B-VL-Instruct as judge model
+python3 deep_search.py --query "Interested in deathbed sentiments of any kind, and in any mention of last words or last lesson, or story/ruling said towards the end of someone's life or last time they will be able to give that teaching"
+
+# Rerank using Qwen3-32B-VL-Instruct
+python3 rerank.py --query "Interested in deathbed sentiments of any kind, and in any mention of last words or last lesson, or story/ruling said towards the end of someone's life or last time they will be able to give that teaching. Priority given to actual deathbed lessons, second priority given to showing me drop-the-mic interesting things relevant to my search query"
+
+# Used Qwen3-32B-VL-Instruct (didn't yet switch to Thinking, so hopefully there were no omissions or mistakes in this stage)
+python3 collect_transform_pretty.py
+
+# Used Qwen3-32B-VL-Instruct, with fallback to Qwen3-32B-Thinking after three failures.
+# Some of the run used Qwen3-32B (April 2025)
+python3 yellow_marker.py
+
+python3 generate_printable_pdf.py
