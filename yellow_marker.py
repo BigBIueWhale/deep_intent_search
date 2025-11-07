@@ -262,11 +262,18 @@ def _llm_highlight_single(text: str, search_intent: str, evidence_section: str, 
     ]
 
     last_err: Optional[str] = None
+    half_retries = max_retries // 2
     for attempt in range(1, max_retries + 1):
         try:
+            # Only the highest quality models are able to repeat repetitive text in full.
+            # Sometimes paragraphs start with the same words, and models will get confused
+            # and complete a paragraph with the contents of another paragraph. The observable
+            # result will be shorter than the input- at which point we eventually trigger
+            # usage of a higher quality model (with much more thinking) to circumvent this issue.
+            role = "highest_quality" if attempt > half_retries else "splitter"
             resp = chat_complete(
                 messages=messages,
-                role="splitter",
+                role=role,
                 client=CLIENT,
                 max_completion_tokens=16384,
                 please_no_thinking=False,
