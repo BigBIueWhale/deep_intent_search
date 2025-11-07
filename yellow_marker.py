@@ -284,9 +284,11 @@ def _llm_highlight_single(text: str, search_intent: str, evidence_section: str, 
                 continue
 
             # Light validity: length must be close in size (or slightly smaller) than input
-            ratio = len(block) / len(text_codeblock)
+            ratio = len(block) / len(text_codeblock) if len(text_codeblock) else 0
             if ratio < 0.98:
-                last_err = f"Returned code block is only {ratio}% the length of input (len(block)={len(block)} < len(text_codeblock)={len(text_codeblock)}); likely content omitted."
+                percent = ratio * 100
+                last_err = (f"Returned code block is only {percent:.2f}% the length of input "
+                            f"(len(block)={len(block)} < len(text_codeblock)={len(text_codeblock)}); likely content omitted.")
                 print(f"Retry {attempt}/{max_retries}: {last_err}")
                 continue
 
