@@ -205,16 +205,18 @@ TAG_OPEN = "<mark-yellow>"
 TAG_CLOSE = "</mark-yellow>"
 TAG_ANY_RE = re.compile(r"</?mark-yellow>")
 
-def validate_yellow_tags(text: str) -> Tuple[bool, str]:
+def validate_yellow_tags(text: str, require_at_least_one: bool = False) -> Tuple[bool, str]:
     """
     Validate the yellow tags inside a plain text (no code fences here).
     Requirements:
       - Opening and closing tags exist only as <mark-yellow> and </mark-yellow>.
       - Tags are properly paired.
       - No nested tags (i.e., cannot open when already open).
+      - If require_at_least_one=True, at least one complete pair must be present.
     Returns (ok, reason_if_not_ok).
     """
     open_count = 0
+    pair_count = 0
     for m in TAG_ANY_RE.finditer(text):
         token = m.group(0)
         if token == TAG_OPEN:
@@ -225,6 +227,7 @@ def validate_yellow_tags(text: str) -> Tuple[bool, str]:
             if open_count == 0:
                 return (False, "Unmatched closing </mark-yellow> detected (no prior opening tag).")
             open_count -= 1
+            pair_count += 1
         else:
             # Shouldn't happen because regex limits to the two forms
             return (False, f"Unknown tag variant {token!r} encountered.")
@@ -233,6 +236,8 @@ def validate_yellow_tags(text: str) -> Tuple[bool, str]:
     # Additionally, ensure there is no malformed variation like <mark-yellow /> or attributes:
     if re.search(r"<mark-yellow\s*/?>|<mark-yellow[^>]*>", text) and TAG_OPEN not in text:
         return (False, "Malformed <mark-yellow> tag variant detected.")
+    if require_at_least_one and pair_count == 0:
+        return (False, "No <mark-yellow> tags found; at least one highlight is required.")
     return (True, "")
 
 def ensure_single_txt_codeblock(s: str) -> Optional[str]:
@@ -343,22 +348,38 @@ def run_llm_highlight(text_inner: str, search_intent: str, evidence_section: str
     tokens = count_tokens(text_inner)
     threshold = 6000
     if tokens < threshold:
-        return _llm_highlight_single(text_inner, search_intent, evidence_section, max_retries)
+        # Retry the whole single-pass if the final output has zero highlights
+        for attempt in range(1, max_retries + 1):
+            block = _llm_highlight_single(text_inner, search_intent, evidence_section, max_retries)
+            m = CODEBLOCK_RE.search(block)
+            if not m:
+                raise ValueError("Failed to extract inner from block")
+            inner = m.group(1)
+            ok, reason = validate_yellow_tags(inner, require_at_least_one=True)
+            if ok:
+                return block
+            print(f"Retry {attempt}/{max_retries}: {reason}")
+        raise RuntimeError("LLM produced no <mark-yellow> tags after retries.")
     else:
         # Ironically, we're performing a split action after we already had a split, but that's what's required
         # since we lost all split information after passing through the prettyfier.
         num_parts = (tokens + 4999) // 5000
-        parts = split_text_evenly(text_inner, num_parts)
-        highlighted_inners: List[str] = []
-        for part in parts:
-            block_part = _llm_highlight_single(part, search_intent, evidence_section, max_retries)
-            m = CODEBLOCK_RE.search(block_part)
-            if not m:
-                raise ValueError("Failed to extract inner from part block")
-            inner_part = m.group(1)
-            highlighted_inners.append(inner_part)
-        full_inner = "".join(highlighted_inners)
-        return f"```txt\n{full_inner}\n```"
+        for attempt in range(1, max_retries + 1):
+            parts = split_text_evenly(text_inner, num_parts)
+            highlighted_inners: List[str] = []
+            for part in parts:
+                block_part = _llm_highlight_single(part, search_intent, evidence_section, max_retries)
+                m = CODEBLOCK_RE.search(block_part)
+                if not m:
+                    raise ValueError("Failed to extract inner from part block")
+                inner_part = m.group(1)
+                highlighted_inners.append(inner_part)
+            full_inner = "".join(highlighted_inners)
+            ok, reason = validate_yellow_tags(full_inner, require_at_least_one=True)
+            if ok:
+                return f"```txt\n{full_inner}\n```"
+            print(f"Retry (aggregate) {attempt}/{max_retries}: {reason}")
+        raise RuntimeError("LLM produced no <mark-yellow> tags after retries in multi-part mode.")
 
 
 # ---------- Resumability ----------
