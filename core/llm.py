@@ -367,16 +367,12 @@ def chat_complete(
         "messages": payload_messages,
         "options": options,
         "stream": False,
+        "think": can_think and not hybrid_nothink_switch
     }
 
     # Strict JSON output enforced by Ollama doesn't work together with "<think>" tags.
     if require_json and not can_think:
         payload["format"] = "json"
-
-    if can_think and not hybrid_nothink_switch:
-        # Simulate Ollama response structure
-        if can_think:
-            payload["think"] = True
 
     url = f"{_base_url()}/api/chat"
 
