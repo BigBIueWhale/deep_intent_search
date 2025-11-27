@@ -8,4 +8,4 @@ python3 collect_transform_pretty.py
 
 python3 yellow_marker.py
 
-generate_printable_pdf.py
+python3 generate_printable_pdf.py
