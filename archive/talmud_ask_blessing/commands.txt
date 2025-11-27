@@ -1,0 +1,11 @@
+# Ran this command five times total. Three times with OLLAMA_MODEL_JUDGE=qwen3-vl:32b-instruct
+# then another twice with OLLAMA_MODEL_JUDGE=qwen3:32b
+python3 deep_search.py --query "Interested in stories and/or incidents in which somebody **requests** to be granted a blessing from a fellow **person**"
+
+python3 rerank.py --query "Interested in stories and/or incidents in which somebody **requests** to be granted a blessing from a fellow **person**"
+
+python3 collect_transform_pretty.py
+
+python3 yellow_marker.py
+
+generate_printable_pdf.py
