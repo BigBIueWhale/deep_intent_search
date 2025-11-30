@@ -152,6 +152,7 @@ def check_relevance_with_llm(
     context: str,
     chunk_of_interest: str,
     chunk_filename: str,
+    ctx: str,
     query: str,
     max_retries: int = 5
 ) -> Dict[str, Any]:
@@ -164,11 +165,17 @@ def check_relevance_with_llm(
         }
 
     prompt = f"""
+--- BACKGROUND KNOWLEDGE BEGINS ---
+{ctx}
+--- BACKGROUND KNOWLEDGE ENDS ---
+
 You are a highly focused research assistant. Your task is to determine if a specific, isolated section of text is relevant to a user's query.
 
 I will provide you with a large context of surrounding text to help you understand the overall topic. However, your final judgment must be based ONLY on the content of the **"SECTION OF INTEREST"** provided at the very end. The context is for reasoning, but the decision must be about the specific section.
 
-The user's query is: "{query}"
+--- USER QUERY BEGINS ---
+{query}
+--- USER QUERY ENDS ---
 
 --- CONTEXT BEGINS ---
 {context}
@@ -251,6 +258,7 @@ Respond with a JSON object in the following format and nothing else:
 
 def run_search_pass(
     all_chunks: List[Chunk],
+    ctx: str,
     query: str,
     plan: RunPlan
 ) -> None:
@@ -277,7 +285,7 @@ def run_search_pass(
             all_chunks, chunk.original_index - 1, CONTEXT_WINDOW_SIZE_TOKENS
         )
         judgement = check_relevance_with_llm(
-            context_window, chunk.content, chunk.filename, query
+            context_window, chunk.content, chunk.filename, ctx, query
         )
 
         record = {
@@ -393,6 +401,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Perform a deep, contextual search through text chunks using an LLM."
     )
+    parser.add_argument("--ctx", type=str, required=True, help="The search context.")
     parser.add_argument("--query", type=str, required=True, help="The search query for this run.")
     parser.add_argument("--dir", type=str, default="split/chunks", help="The directory containing the text chunks (default: 'split/chunks').")
     parser.add_argument("--outdir", type=str, default='search_runs', help="Directory for JSONL run files (default: './search_runs').")
@@ -438,7 +447,7 @@ def main():
                 meta=meta,
             )
 
-            run_search_pass(all_chunks, args.query, plan)
+            run_search_pass(all_chunks, args.ctx, args.query, plan)
             return
 
         # ========== Cases 2 & 3: Existing series ==========
@@ -488,7 +497,7 @@ def main():
                 meta=new_meta,
             )
 
-            run_search_pass(all_chunks, args.query, plan)
+            run_search_pass(all_chunks, args.ctx, args.query, plan)
             return
 
         # Partially complete -> Resume
@@ -511,7 +520,7 @@ def main():
             meta=None,                       # don't rewrite meta on resume
         )
 
-        run_search_pass(all_chunks, args.query, plan)
+        run_search_pass(all_chunks, args.ctx, args.query, plan)
         return
 
     except KeyboardInterrupt:

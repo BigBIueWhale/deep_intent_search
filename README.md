@@ -34,9 +34,10 @@ Instead of overselling relevance, the model "performs" by writing a high-quality
 2. [deep_search.py](./deep_search.py):
     - **Input:**
       1. [./split/chunks](./split/chunks/)
-      2. `--query "Interested in content that ..."`
-      3. Newest `search_runs/xxxx.jsonl` if exists.
-    - **Output:** [./search_runs/0001.jsonl](./search_runs/0001.jsonl) ([0002.jsonl](./search_runs/0002.jsonl) etc for refinement searches)
+      2. `--ctx "We're searching thoroughly through ..."`
+      3. `--query "Interested in content that ..."`
+      4. Newest `search_runs/xxxx.jsonl` if exists.
+    - **Output:** [./search_runs/0001.jsonl](./search_runs/0001.jsonl)
 3. [rerank.py](./rerank.py):
     - **Input:**
       1. [./split/chunks](./split/chunks/)
@@ -142,7 +143,7 @@ This is the most expensive possible way to search, and it's very unlikely to mis
 
 Run this command:
 ```powershell
-PS C:\Users\user\Downloads\deep_semantic_chunking> python deep_search.py --query "Looking for **solid** evidence of the fact that if you say Voldemort's explicit name, he will find you. I'm **not** interested in theories or rumors that are mentioned in the book. I'm **not** interested in hearing someone say He who must not be named, just because they're afraid, again, due to these rumors. I'm only looking for instances where this actually happened. And where Voldemort **actually** somehow seems to gain information from somebody saying his name."
+PS C:\Users\user\Downloads\deep_semantic_chunking> python deep_search.py --ctx "We're searching thoroughly through all seven books of Harry Potter" --query "Looking for **solid** evidence of the fact that if you say Voldemort's explicit name, he will find you. I'm **not** interested in theories or rumors that are mentioned in the book. I'm **not** interested in hearing someone say He who must not be named, just because they're afraid, again, due to these rumors. I'm only looking for instances where this actually happened. And where Voldemort **actually** somehow seems to gain information from somebody saying his name."
 Loading and tokenizing all chunks from disk...
 Loaded 2790 chunks (1,646,744 tokens).
 
