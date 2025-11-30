@@ -1,6 +1,6 @@
 # Run with OLLAMA_MODEL_JUDGE=qwen3-vl:32b-instruct
 python3 deep_search.py \
-    --query "My query goes here" \
+    --query "Interested in example of human technology being presented as equal or superior to magic" \
     --ctx "$(cat <<'EOF'
 >> System Entry: Narrative Database & World Simulation
 >> Source Material: Keeper of the Lost Cities (Series)
