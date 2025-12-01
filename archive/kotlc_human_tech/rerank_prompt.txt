@@ -1,0 +1,1 @@
+python3 rerank.py --query "Interested in example of human technology being presented as equal or superior to magic"
