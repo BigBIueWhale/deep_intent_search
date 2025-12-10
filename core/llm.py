@@ -267,7 +267,7 @@ _SEED_OSS_36B_BASE_OPTIONS = {
 
     # Balanced cap to accommodate medium thinking budget (2048) + reasonable response without infinite generation risks.
     # Provides headroom while optimizing for efficiency.
-    "num_predict": 8192,
+    "num_predict": 11264,
 
     # Layers to offload, all of them.
     "num_gpu": 40,
@@ -418,10 +418,7 @@ def chat_complete(
             if disable_think:
                 payload["think"] = False
             else:
-                # Always use medium for Seed-OSS to limit thinking budget and avoid context overflow
-                # Gets handled according to template:
-                # https://ollama.com/milkey/Seed-OSS-36B-Instruct:q4_K_M/blobs/260bb0ab1136
-                payload["think"] = "medium"
+                payload["think"] = True  # Defaults to unlimited budget per model docs
         else:
             payload["think"] = not toggle_nothink_switch
 

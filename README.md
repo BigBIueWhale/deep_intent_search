@@ -105,6 +105,7 @@ OLLAMA_MODEL_HIGHEST_QUALITY=qwen3-vl:32b-thinking
 > ollama pull qwen3-vl:32b-instruct
 > ollama pull qwen3-vl:32b-thinking
 > ollama pull qwen3:32b
+> ollama pull milkey/Seed-OSS-36B-Instruct:q4_K_M
 > ollama pull qwen3:30b-a3b-thinking-2507-q4_K_M
 > ollama pull qwen3:30b-a3b-instruct-2507-q4_K_M
 > ollama pull JollyLlama/GLM-4-32B-0414-Q4_K_M
