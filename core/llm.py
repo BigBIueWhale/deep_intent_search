@@ -418,6 +418,10 @@ def chat_complete(
             if disable_think:
                 payload["think"] = False
             else:
+                # "ollama-linux-amd64_v0.13.2" and earlier only allows GPT-OSS to set thinking level.
+                # Our current model template hard-codes a 2048 token thinking budget. Note the
+                # implemented thinking budget self-reflection, so seed-oss itself supports thinking budgets
+                # extremely robustly, but Ollama doesn't cooperate yet very well.
                 payload["think"] = True  # Defaults to unlimited budget per model docs
         else:
             payload["think"] = not toggle_nothink_switch
