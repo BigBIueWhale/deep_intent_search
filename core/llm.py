@@ -261,16 +261,16 @@ _QWEN3_VL_32B_THINKING_VL_OPTIONS = {
 # Advanced parameters for seed-oss-36b, applied on every request.
 # Shared across think & no-think.
 _SEED_OSS_36B_BASE_OPTIONS = {
-    # Good context length value for 32GB VRAM and flash attention enabled
+    # Good context length value for 32GB VRAM
     # Ends up using ~31 GB in "ollama ps" when context length is full.
-    "num_ctx": 19456,  # 19k
+    "num_ctx": 15200,
 
     # Balanced cap to accommodate medium thinking budget (2048) + reasonable response without infinite generation risks.
     # Provides headroom while optimizing for efficiency.
     "num_predict": 11264,
 
     # Layers to offload, all of them.
-    "num_gpu": 40,
+    "num_gpu": 65,
 }
 
 # Think mode settings recommended by ByteDance
