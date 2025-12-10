@@ -258,6 +258,35 @@ _QWEN3_VL_32B_THINKING_VL_OPTIONS = {
     "repeat_penalty": 1.0,
 }
 
+# Advanced parameters for seed-oss-36b, applied on every request.
+# Shared across think & no-think.
+_SEED_OSS_36B_BASE_OPTIONS = {
+    # Good context length value for 32GB VRAM and flash attention enabled
+    # Ends up using ~31 GB in "ollama ps" when context length is full.
+    "num_ctx": 19456,  # 19k
+
+    # Balanced cap to accommodate medium thinking budget (2048) + reasonable response without infinite generation risks.
+    # Provides headroom while optimizing for efficiency.
+    "num_predict": 8192,
+
+    # Layers to offload, all of them.
+    "num_gpu": 40,
+}
+
+# Think mode settings recommended by ByteDance
+_SEED_OSS_36B_THINK_OPTIONS = {
+    **_SEED_OSS_36B_BASE_OPTIONS,
+    "temperature": 1.1,
+    "top_p": 0.95,
+}
+
+# No-think mode settings recommended by ByteDance
+_SEED_OSS_36B_NO_THINK_OPTIONS = {
+    **_SEED_OSS_36B_BASE_OPTIONS,
+    "temperature": 0.3,
+    "top_p": 0.95,
+}
+
 def get_ollama_options(model: str, please_no_thinking: bool, has_images: bool = False) -> dict:
     if model == "qwen3:32b":
         return dict(
@@ -277,6 +306,12 @@ def get_ollama_options(model: str, please_no_thinking: bool, has_images: bool = 
         return dict(_QWEN3_VL_32B_THINKING_VL_OPTIONS) if has_images else dict(_QWEN3_VL_32B_THINKING_TEXT_ONLY_OPTIONS)
     if model == "qwen3-vl:32b-instruct":
         return dict(_QWEN3_VL_32B_INSTRUCT_VL_OPTIONS) if has_images else dict(_QWEN3_VL_32B_INSTRUCT_TEXT_ONLY_OPTIONS)
+    if model == "milkey/Seed-OSS-36B-Instruct:q4_K_M":
+        return dict(
+            _SEED_OSS_36B_NO_THINK_OPTIONS
+            if please_no_thinking
+            else _SEED_OSS_36B_THINK_OPTIONS
+        )
     raise ValueError(
         f"Unrecognized OLLAMA_MODEL '{model}'. See README for .env options"
     )
@@ -286,17 +321,19 @@ def _supports_thinking(model: str) -> bool:
         "qwen3:32b",
         "qwen3:30b-a3b-thinking-2507-q4_K_M",
         "qwen3-vl:32b-thinking",
+        "milkey/Seed-OSS-36B-Instruct:q4_K_M",
     }
 
-def _supports_qwen3_hybrid(model: str) -> bool:
+def _supports_think_toggle(model: str) -> bool:
     return model in {
         "qwen3:32b",
+        "milkey/Seed-OSS-36B-Instruct:q4_K_M",
     }
 
 _THINK_TAG_RE = re.compile(r"<think>(.*?)</think>", flags=re.DOTALL | re.IGNORECASE)
 
 
-def _extract_thinking(message_obj: dict, can_think: bool, content: str) -> Optional[str]:
+def _extract_thinking(message_obj: dict, can_think: bool, content: str, model: str) -> Optional[str]:
     """
     Extract a 'thinking' trace if present. Ollama sometimes emits it as a separate
     field, or inline inside <think>...</think> tags. We support both.
@@ -308,7 +345,11 @@ def _extract_thinking(message_obj: dict, can_think: bool, content: str) -> Optio
 
     # 2) inline tags
     if can_think and content:
-        m = _THINK_TAG_RE.search(content)
+        if "seed" in model.lower():
+            think_tag_re = re.compile(r"<seed:think>(.*?)</seed:think>", flags=re.DOTALL | re.IGNORECASE)
+        else:
+            think_tag_re = _THINK_TAG_RE
+        m = think_tag_re.search(content)
         if m:
             return m.group(1).strip()
 
@@ -335,7 +376,7 @@ def chat_complete(
 
     model = get_model_name(role)
     can_think = _supports_thinking(model)
-    is_hybrid = _supports_qwen3_hybrid(model)
+    is_toggle = _supports_think_toggle(model)
 
     has_images = False
     if "qwen3-vl" in model:
@@ -346,14 +387,16 @@ def chat_complete(
 
     options = get_ollama_options(model, please_no_thinking, has_images=has_images)
 
-    hybrid_nothink_switch = is_hybrid and please_no_thinking
+    toggle_nothink_switch = is_toggle and please_no_thinking
 
-    if hybrid_nothink_switch:
+    if toggle_nothink_switch and "qwen3" in model:
         # Insert "/no_think" at the beginning of the system prompt
         system_prompt = messages[0]
         system_prompt["content"] = f"/no_think {system_prompt['content']}"
 
-    if hybrid_nothink_switch or not can_think:
+    disable_think = please_no_thinking and is_toggle
+
+    if toggle_nothink_switch or disable_think or not can_think:
         options["num_predict"] = max_completion_tokens
 
     payload_messages = copy.deepcopy(messages)
@@ -367,8 +410,20 @@ def chat_complete(
         "messages": payload_messages,
         "options": options,
         "stream": False,
-        "think": can_think and not hybrid_nothink_switch
     }
+
+    # Handle think parameter
+    if can_think:
+        if "seed" in model.lower():
+            if disable_think:
+                payload["think"] = False
+            else:
+                # Always use medium for Seed-OSS to limit thinking budget and avoid context overflow
+                # Gets handled according to template:
+                # https://ollama.com/milkey/Seed-OSS-36B-Instruct:q4_K_M/blobs/260bb0ab1136
+                payload["think"] = "medium"
+        else:
+            payload["think"] = not toggle_nothink_switch
 
     # Strict JSON output enforced by Ollama doesn't work together with "<think>" tags.
     if require_json and not can_think:
@@ -386,7 +441,7 @@ def chat_complete(
     msg = data.get("message") or {}
     content = msg.get("content") or ""
 
-    thinking_text = _extract_thinking(msg, can_think, content)
+    thinking_text = _extract_thinking(msg, can_think, content, model=model)
 
     # Stats: use Ollama JSON keys if present; set None otherwise
     # Units from Ollama are nanoseconds for *_duration fields.

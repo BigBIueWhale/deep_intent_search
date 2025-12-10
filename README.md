@@ -86,6 +86,7 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 #   - qwen3-vl:32b-instruct
 #   - qwen3-vl:32b-thinking
 #   - qwen3:32b
+#   - milkey/Seed-OSS-36B-Instruct:q4_K_M
 #   - qwen3:30b-a3b-thinking-2507-q4_K_M
 #   - qwen3:30b-a3b-instruct-2507-q4_K_M
 #   - JollyLlama/GLM-4-32B-0414-Q4_K_M
