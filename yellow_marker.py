@@ -275,7 +275,7 @@ def _llm_highlight_single(text: str, search_intent: str, evidence_section: str, 
             # and complete a paragraph with the contents of another paragraph. The observable
             # result will be shorter than the input- at which point we eventually trigger
             # usage of a higher quality model (with much more thinking) to circumvent this issue.
-            role = "highest_quality" if attempt > half_retries else "judge"
+            role = "another_long_context" if attempt > half_retries else "long_context"
             resp = chat_complete(
                 messages=messages,
                 role=role,

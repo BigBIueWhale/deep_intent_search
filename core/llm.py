@@ -84,9 +84,17 @@ def get_client() -> httpx.Client | None:
 
 def get_model_name(role: str | None = None) -> str:
     roles = {
-        "judge": ["OLLAMA_MODEL_JUDGE", "OLLAMA_MODEL_HIGHEST_QUALITY"],
-        "splitter": ["OLLAMA_MODEL_SPLITTER", "OLLAMA_MODEL_HIGHEST_QUALITY"],
-        "highest_quality": ["OLLAMA_MODEL_HIGHEST_QUALITY"],
+        # 1. HYBRID REASONING: For speed by default, but capable of self-correction (reasoning)
+        "hybrid": ["OLLAMA_MODEL_HYBRID_REASONING"],
+
+        # 2. LONG CONTEXT: Maximum context window (19k+) for large chunks/history.
+        "long_context": ["OLLAMA_MODEL_LONG_CONTEXT"],
+
+        # 3. SMARTEST: Escalation model for difficult instruction following or final polish.
+        "smartest": ["OLLAMA_MODEL_SMARTEST"],
+
+        # 4. ANOTHER LONG CONTEXT: Specialized escalation for long-context tasks (e.g. highlighting).
+        "another_long_context": ["OLLAMA_MODEL_ANOTHER_LONG_CONTEXT"],
     }
 
     allowed = ", ".join(sorted(roles))

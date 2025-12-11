@@ -393,7 +393,7 @@ Full text:
             try:
                 response = chat_complete(
                     messages=messages,
-                    role="splitter",
+                    role="hybrid",
                     client=client,
                     max_completion_tokens=256,
                     please_no_thinking=attempt_chat_idx < 2,

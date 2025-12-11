@@ -72,7 +72,7 @@ Create `./.env` with:
 #OLLAMA_HOST=172.17.0.1:11434
 
 # Optional: Customize timeout value in seconds for each Ollama request
-# Defaults to give minutes.
+# Defaults to five minutes.
 # This functionality is required to avoid Ollama bug where it sometimes
 # just forgets about our request, and leaves our script hanging forever.
 #OLLAMA_TIMEOUT_SECONDS=300
@@ -91,13 +91,25 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 #   - qwen3:30b-a3b-instruct-2507-q4_K_M
 #   - JollyLlama/GLM-4-32B-0414-Q4_K_M
 #   - gemma3:27b
-#
-# Usage:
-#   - OLLAMA_MODEL_JUDGE is used by deep_search.py (relevance judging)
-#   - OLLAMA_MODEL_SPLITTER is used by semantic_splitter.py (chunk boundary finder)
-OLLAMA_MODEL_JUDGE=qwen3:32b
-OLLAMA_MODEL_SPLITTER=qwen3:32b
-OLLAMA_MODEL_HIGHEST_QUALITY=milkey/Seed-OSS-36B-Instruct:q4_K_M
+
+# OLLAMA_MODEL_HYBRID_REASONING:
+#   Used by semantic_splitter.py. Needs to support both fast instruction following
+#   and deep self-correction (reasoning) when splitting fails.
+OLLAMA_MODEL_HYBRID_REASONING=milkey/Seed-OSS-36B-Instruct:q4_K_M
+
+# OLLAMA_MODEL_LONG_CONTEXT:
+#   Used by collect_transform_pretty.py, and yellow_marker.py (primary).
+#   Needs a massive context window (19k+) to ingest large chunks and history.
+OLLAMA_MODEL_LONG_CONTEXT=qwen3:32b
+
+# OLLAMA_MODEL_SMARTEST:
+#   Used by deep_search.py, rerank.py. The highest quality model that fits on our GPU.
+OLLAMA_MODEL_SMARTEST=milkey/Seed-OSS-36B-Instruct:q4_K_M
+
+# OLLAMA_MODEL_ANOTHER_LONG_CONTEXT:
+#   Used by yellow_marker.py as an escalation fallback.
+#   Needs long context and different architecture to solve persistent failures.
+OLLAMA_MODEL_ANOTHER_LONG_CONTEXT=qwen3-vl:32b-instruct
 ```
 
 > Pull models once:
@@ -116,11 +128,13 @@ The LLM is called with the metaparameters described in [./core/llm.py](./core/ll
 
 ## Per-model options
 
-- `qwen3-vl:32b-instruct`- Recommended for all judgement tasks. Seems to have avoided the issue that plagued the non-thinking version of `qwen3:32b`- namely getting confused between sections. Definitely seems to find more results than `qwen3:32b` (with thinking), which is incredible! Definitely faster too (obviously, because it's non-thinking).
-
-- `qwen3-vl:32b-thinking`- Thinks at least twice as much as `qwen3:32b`. Definitely smarter, but dangerous due to its high VRAM consumption (all those thinking tokens come dangerously close to the context length).
+- `milkey/Seed-OSS-36B-Instruct:q4_K_M` can be trusted as a judge. Supports a "hybrid reasoning" mode where it can be switched between fast instruct-only responses and deep thinking responses. This makes it ideal for `OLLAMA_MODEL_HYBRID_REASONING` and `OLLAMA_MODEL_SMARTEST`. It has a context limit of \~15k tokens on 32 GB VRAM.
 
 - `qwen3:32b` is highly recommended for all tasks in this project. In its `/no_think` variable, it's a model of average reliability, probably even less reliable than `qwen3:30b-a3b-instruct-2507-q4_K_M`. But, since it's a hybrid reasoning model- upon multiple consecurive failures in [semantic_splitter.py](./semantic_splitter.py) we simply turn on thinking mode on the fly! Without having to unload and then load a different model into VRAM!
+
+- `qwen3-vl:32b-instruct`- Recommended for all judgement tasks. Seems to have avoided the issue that plagued the non-thinking version of `qwen3:32b`- namely getting confused between sections. Definitely seems to find more results than `qwen3:32b` (with thinking), which is incredible! Definitely faster too (obviously, because it's non-thinking). Has lots of false-positives though.
+
+- `qwen3-vl:32b-thinking`- Thinks at least twice as much as `qwen3:32b`. Not that great, and dangerous due to its high VRAM consumption (all those thinking tokens come dangerously close to the context length).
 
 - `JollyLlama/GLM-4-32B-0414-Q4_K_M` was an attempt to find a dense non-thinking model to be an `OLLAMA_MODEL_SPLITTER`, and it's definitely the most capable non-thinking model shown here that can fit on a single consumer GPU. Its high multilingual capabilities, and general world knowledge might prove useful.
 

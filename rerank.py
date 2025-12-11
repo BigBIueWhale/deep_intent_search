@@ -307,7 +307,7 @@ Respond ONLY with JSON:
         try:
             resp = chat_complete(
                 messages=messages,
-                role="judge",
+                role="smartest",
                 client=client,
                 max_completion_tokens=512,
                 please_no_thinking=False,

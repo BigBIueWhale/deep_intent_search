@@ -205,7 +205,7 @@ Respond with a JSON object in the following format and nothing else:
         try:
             response = chat_complete(
                 messages=messages,
-                role="judge",
+                role="smartest",
                 client=CLIENT,
                 # Fail fast on infinite generations, only
                 # has effect for models that don't emit <think> tag.
