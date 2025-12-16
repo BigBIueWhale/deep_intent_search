@@ -112,9 +112,8 @@ def get_model_name(role: str | None = None) -> str:
 # Advanced parameters for qwen3:32b, applied on every request.
 # Shared across think & no-think.
 _QWEN3_32B_BASE_OPTIONS = {
-    # Good context length value for 32GB VRAM and flash attention enabled
-    # Ends up using ~31 GB in "ollama ps" when context length is full.
-    "num_ctx": 19456,  # 19k
+    # Max native context, uses ~29GB VRAM.
+    "num_ctx": 32768,  # 32k
 
     # Setting -1 (infinite) would cause infinite generation once in a while.
     # Infinite generations are observed to be exactly 239,998 thinking tokens
