@@ -87,14 +87,14 @@ def get_model_name(role: str | None = None) -> str:
         # 1. HYBRID REASONING: For speed by default, but capable of self-correction (reasoning)
         "hybrid": ["OLLAMA_MODEL_HYBRID_REASONING"],
 
-        # 2. LONG CONTEXT: Maximum context window (19k+) for large chunks/history.
+        # 2. LONG CONTEXT: Maximum context window for large chunks/history.
         "long_context": ["OLLAMA_MODEL_LONG_CONTEXT"],
 
-        # 3. SMARTEST: Escalation model for difficult instruction following or final polish.
-        "smartest": ["OLLAMA_MODEL_SMARTEST"],
-
-        # 4. ANOTHER LONG CONTEXT: Specialized escalation for long-context tasks (e.g. highlighting).
+        # 3. ANOTHER LONG CONTEXT: Specialized escalation for long-context tasks (e.g. highlighting).
         "another_long_context": ["OLLAMA_MODEL_ANOTHER_LONG_CONTEXT"],
+
+        # 4. SMARTEST: Escalation model for difficult instruction following or final polish.
+        "smartest": ["OLLAMA_MODEL_SMARTEST"],
     }
 
     allowed = ", ".join(sorted(roles))

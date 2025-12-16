@@ -99,7 +99,7 @@ OLLAMA_MODEL_HYBRID_REASONING=qwen3:32b
 
 # OLLAMA_MODEL_LONG_CONTEXT:
 #   Used by collect_transform_pretty.py, and yellow_marker.py (primary).
-#   Needs a massive context window (19k+) to ingest large chunks and history.
+#   Needs a massive context window to ingest large chunks and history.
 OLLAMA_MODEL_LONG_CONTEXT=qwen3:32b
 
 # OLLAMA_MODEL_ANOTHER_LONG_CONTEXT:
