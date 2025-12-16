@@ -183,9 +183,10 @@ SYSTEM_PROMPT = (
 )
 
 USER_PROMPT_TEMPLATE = (
-    "You are a highlighter. Insert <mark-yellow> and </mark-yellow> around portions of TEXT that are relevant to the SEARCH_INTENT."
-    "The provided TEXT does contain material relevant to the query; your job is to precisely identify and tag those parts."
-    "Prefer several small, precise highlights over one large span when that better captures relevance. Do not alter any characters except for inserting these tags.\n\n"
+    "You are a highlighter. Insert <mark-yellow> and </mark-yellow> around portions of TEXT that are relevant to the SEARCH_INTENT.\n"
+    "The provided TEXT does contain material relevant to the query; your job is to precisely identify and tag those parts.\n"
+    "Insert tags to account for the fact that the user will only read the text you mark, so you need to mark strategically and fully.\n"
+    "Do not alter any characters except for inserting these tags.\n\n"
     "RULES:\n"
     "* Span sizes: mark just enough word (or sentences) in the text so that if a user were to read only the yellow marked portions, they will have a full picture of the aspects of the text relevant to their query.\n"
     "* Multiple markers are encouraged when distinct relevant snippets exist; wrap each with its own <mark-yellow>…</mark-yellow> pair.\n"
