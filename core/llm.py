@@ -153,7 +153,7 @@ _QWEN3_32B_NO_THINK_OPTIONS = {
 _QWEN3_30B_A3B_THINKING_OPTIONS = {
     # Good context length value for 32GB VRAM and flash attention enabled
     # Ends up using ~31 GB in "ollama ps" when context length is full.
-    "num_ctx": 57344, # 56k
+    "num_ctx": 130000,
     "num_predict": 49152, # 30b-a3b tends to think a lot
     "temperature": 0.6,
     "top_k": 20,
@@ -169,7 +169,7 @@ _QWEN3_30B_A3B_THINKING_OPTIONS = {
 _QWEN3_30B_A3B_INSTRUCT_OPTIONS = {
     # Good context length value for 32GB VRAM and flash attention enabled
     # Keep identical to the thinking variant per requirements.
-    "num_ctx": 57344, # 56k
+    "num_ctx": 130000,
     # Instruct variants don't "think" as long; you can still override at call-site if needed.
     # Using the "magic number" 16,384 instead of the 11,264 previously written here —
     # because the official page for Qwen3-30B-A3B-Instruct-2507 says:
