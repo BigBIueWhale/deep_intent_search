@@ -187,8 +187,6 @@ _QWEN3_30B_A3B_INSTRUCT_OPTIONS = {
 }
 
 _GLM_4_32B_OPTIONS = {
-    # GLM4 has crazy efficient context window.
-    # It has 48 q heads and only 2 kv heads, a 24:1 ratio which is pretty high.
     # We turn on full context capability of the model
     "num_ctx": 32768,
     # Just a number to avoid infinite generation
@@ -207,8 +205,8 @@ _GEMMA3_27B_OPTIONS = {
 
 _QWEN3_VL_32B_BASE_OPTIONS = {
     # Good context length value for 32GB VRAM and flash attention enabled
-    # Ends up using ~31 GB in "ollama ps" when context length is full.
-    "num_ctx": 19456,  # 19k
+    # Ends up using just under 32 GB in "ollama ps" when context length is full.
+    "num_ctx": 40000,  # 40k
 
     # Setting -1 (infinite) would cause infinite generation once in a while.
     # Infinite generations are observed to be exactly 239,998 thinking tokens
@@ -269,8 +267,8 @@ _QWEN3_VL_32B_THINKING_VL_OPTIONS = {
 # Shared across think & no-think.
 _SEED_OSS_36B_BASE_OPTIONS = {
     # Good context length value for 32GB VRAM
-    # Ends up using ~31 GB in "ollama ps" when context length is full.
-    "num_ctx": 15200,
+    # Ends up using just under 32 GB in "ollama ps" when context length is full.
+    "num_ctx": 16000,
 
     # Balanced cap to accommodate medium thinking budget (2048) + reasonable response without infinite generation risks.
     # Provides headroom while optimizing for efficiency.
