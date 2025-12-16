@@ -95,21 +95,21 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 # OLLAMA_MODEL_HYBRID_REASONING:
 #   Used by semantic_splitter.py. Needs to support both fast instruction following
 #   and deep self-correction (reasoning) when splitting fails.
-OLLAMA_MODEL_HYBRID_REASONING=milkey/Seed-OSS-36B-Instruct:q4_K_M
+OLLAMA_MODEL_HYBRID_REASONING=qwen3:32b
 
 # OLLAMA_MODEL_LONG_CONTEXT:
 #   Used by collect_transform_pretty.py, and yellow_marker.py (primary).
 #   Needs a massive context window (19k+) to ingest large chunks and history.
 OLLAMA_MODEL_LONG_CONTEXT=qwen3:32b
 
-# OLLAMA_MODEL_SMARTEST:
-#   Used by deep_search.py, rerank.py. The highest quality model that fits on our GPU.
-OLLAMA_MODEL_SMARTEST=milkey/Seed-OSS-36B-Instruct:q4_K_M
-
 # OLLAMA_MODEL_ANOTHER_LONG_CONTEXT:
 #   Used by yellow_marker.py as an escalation fallback.
 #   Needs long context and different architecture to solve persistent failures.
-OLLAMA_MODEL_ANOTHER_LONG_CONTEXT=qwen3-vl:32b-instruct
+OLLAMA_MODEL_ANOTHER_LONG_CONTEXT=qwen3-vl:32b-thinking
+
+# OLLAMA_MODEL_SMARTEST:
+#   Used by deep_search.py, rerank.py. The highest quality model that fits on our GPU.
+OLLAMA_MODEL_SMARTEST=milkey/Seed-OSS-36B-Instruct:q4_K_M
 ```
 
 > Pull models once:

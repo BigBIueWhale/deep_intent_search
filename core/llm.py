@@ -206,7 +206,7 @@ _GEMMA3_27B_OPTIONS = {
 _QWEN3_VL_32B_BASE_OPTIONS = {
     # Good context length value for 32GB VRAM and flash attention enabled
     # Ends up using just under 32 GB in "ollama ps" when context length is full.
-    "num_ctx": 40000,  # 40k
+    "num_ctx": 39000,  # 39k
 
     # Setting -1 (infinite) would cause infinite generation once in a while.
     # Infinite generations are observed to be exactly 239,998 thinking tokens
