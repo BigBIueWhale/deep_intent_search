@@ -105,7 +105,7 @@ OLLAMA_MODEL_LONG_CONTEXT=qwen3:32b
 # OLLAMA_MODEL_ANOTHER_LONG_CONTEXT:
 #   Used by yellow_marker.py as an escalation fallback.
 #   Needs long context and different architecture to solve persistent failures.
-OLLAMA_MODEL_ANOTHER_LONG_CONTEXT=qwen3-vl:32b-thinking
+OLLAMA_MODEL_ANOTHER_LONG_CONTEXT=qwen3:30b-a3b-instruct-2507-q4_K_M
 
 # OLLAMA_MODEL_SMARTEST:
 #   Used by deep_search.py, rerank.py. The highest quality model that fits on our GPU.
