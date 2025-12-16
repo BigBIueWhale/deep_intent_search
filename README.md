@@ -29,7 +29,9 @@ Instead of overselling relevance, the model "performs" by writing a high-quality
 ## Normal Flow
 
 1. [semantic_splitter.py](./semantic_splitter.py):
-    - **Input:** `--files path1 path2`
+    - **Input (choose exactly one):**
+      - `--files path1 path2 ...`
+      - `--files-list /path/to/files_list.txt`
     - **Final output:** [./split/chunks](./split/chunks/)
 2. [deep_search.py](./deep_search.py):
     - **Input:**

@@ -243,6 +243,25 @@ def fallback_split_by_delimiter(text: str) -> int:
     # Note: Might return -1
     return best_split_point
 
+def load_files_from_list_file(list_file_path: str) -> list[str]:
+    """
+    Load file paths from a list file, one path per line.
+    Empty/whitespace-only lines are ignored.
+    """
+    try:
+        with open(list_file_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Error: The file list '{list_file_path}' was not found")
+
+    paths: list[str] = []
+    for line in lines:
+        p = line.strip()
+        if not p:
+            continue
+        paths.append(p)
+    return paths
+
 
 # -------------------- Progress JSONL utilities --------------------
 
@@ -640,13 +659,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Split one or more large text files into smaller, semantically coherent chunks."
     )
-    parser.add_argument(
+
+    input_group = parser.add_mutually_exclusive_group(required=True)
+
+    input_group.add_argument(
         "--files",
         type=str,
-        required=True,
         nargs='+',  # Accept one or more file arguments
         help="Path(s) to the input text file(s) to be split."
     )
+    input_group.add_argument(
+        "--files-list",
+        type=str,
+        help="Path to a text file containing the list of input file paths (one path per line)."
+    )
+
     parser.add_argument(
         "--output-dir",
         type=str,
@@ -655,9 +682,14 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if not args.files:
+    if args.files_list:
+        file_paths = load_files_from_list_file(args.files_list)
+    else:
+        file_paths = args.files or []
+
+    if not file_paths:
         raise ValueError(
-            "Error: No input files specified. Please provide at least one file using the --files argument."
+            "Error: No input files specified. Please provide at least one file using --files or --files-list."
         )
 
     output_dir = args.output_dir
@@ -674,7 +706,7 @@ if __name__ == "__main__":
 
     # Additional guard: refuse if there are stale extra progress files not matching CLI length.
     progress_files = sorted([f for f in os.listdir(progress_dir) if f.endswith(".cuts.jsonl")])
-    max_allowed = len(args.files)
+    max_allowed = len(file_paths)
     for fname in progress_files:
         try:
             idx = int(os.path.splitext(os.path.splitext(fname)[0])[0])
@@ -687,13 +719,13 @@ if __name__ == "__main__":
             )
 
     # Check if all complete already
-    if all_files_complete(args.files, progress_dir):
+    if all_files_complete(file_paths, progress_dir):
         print("--- Progress indicates all files are already split. Finalizing into chunks... ---")
-        finalize_chunks(args.files, output_dir, progress_dir)
+        finalize_chunks(file_paths, output_dir, progress_dir)
         raise SystemExit(0)
 
     # --- File Processing Loop (sequential, resumable) ---
-    for file_idx, input_filename in enumerate(args.files, start=1):
+    for file_idx, input_filename in enumerate(file_paths, start=1):
         print(f"--- Splitting file: {input_filename} ---")
         try:
             with open(input_filename, "r", encoding="utf-8", errors='ignore') as fr:
@@ -711,8 +743,8 @@ if __name__ == "__main__":
             print(f"--- File '{input_filename}' in progress. ---\n")
 
     # --- Final Summary / Finalization ---
-    if all_files_complete(args.files, progress_dir):
-        print(f"--- Completed: All {len(args.files)} file(s) have compliant segments. Materializing chunks... ---")
-        finalize_chunks(args.files, output_dir, progress_dir)
+    if all_files_complete(file_paths, progress_dir):
+        print(f"--- Completed: All {len(file_paths)} file(s) have compliant segments. Materializing chunks... ---")
+        finalize_chunks(file_paths, output_dir, progress_dir)
     else:
         print("\n--- Progress saved. Resume later to continue splitting. ---")
