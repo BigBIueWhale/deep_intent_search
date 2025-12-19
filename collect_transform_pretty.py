@@ -5,9 +5,10 @@ collect_transform_pretty.py
 Output per adjacent group → ./pretty/000001.txt, 000002.txt, ...
 Each file begins with a pretty-printed JSON list of objects (one per RELEVANT
 section in the group), then a blank line, then the full cleaned, continuous
-book-like text for that group (converted by the LLM from the raw source, e.g.,
-HTML → intelligible text). The text is returned inside a **single** markdown
-code block (```txt ... ```), which we extract.
+book-like text (newlines kept to a minimum) for that group.
+(converted by the LLM from the raw source, e.g., HTML → intelligible text).
+The text is returned inside a **single** markdown code block (```txt ... ```),
+which we extract.
 
 Happy-path, fail-loud design: any unexpected condition raises with details.
 
@@ -258,7 +259,7 @@ def split_evenly(group: List[str], max_per_sub: int = MAX_CHUNKS_TO_ASK_LLM_TO_R
 # --------------- LLM cleaning ---------------
 _CLEAN_PROMPT_TEMPLATE = (
     "You're a text cleaner.\n"
-    "Your job: rewrite the ENTIRE given text into a single printable, continuous, book-like narrative.\n"
+    "Your job: rewrite the ENTIRE given text into a single printable, continuous, book-like narrative (newlines only when needed).\n"
     "STRICT RULES:\n"
     "- Output **one** markdown code block with language tag `txt` (and nothing else).\n"
     "- Preserve all content and names and multilingual Unicode as-is, but remove/ignore markup like HTML tags, CSS, JS.\n"
