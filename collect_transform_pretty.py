@@ -269,6 +269,7 @@ _CLEAN_PROMPT_TEMPLATE = (
     "- Keep the original order.\n"
     "- Remove leftover artifacts (anchors, scripts, styles, boilerplate).\n"
     "- Ensure paragraphs are readable with sensible sentence boundaries.\n"
+    "- Do not overuse newlines- that would just waste whitespace on the printed paper.\n"
     "Example (toy):\n"
     "INPUT: `<h1>Title</h1>Hi <b>there</b>!` → OUTPUT:\n"
     "```txt\nTitle. Hi there!\n```\n\n"
