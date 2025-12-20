@@ -259,7 +259,7 @@ def split_evenly(group: List[str], max_per_sub: int = MAX_CHUNKS_TO_ASK_LLM_TO_R
 # --------------- LLM cleaning ---------------
 _CLEAN_PROMPT_TEMPLATE = (
     "You're a text cleaner.\n"
-    "Your job: rewrite the ENTIRE given text into a single printable, continuous, book-like narrative (newlines only when needed).\n"
+    "Your job: rewrite the ENTIRE given text into a single printable, continuous, book-like narrative for printing.\n"
     "STRICT RULES:\n"
     "- Output **one** markdown code block with language tag `txt` (and nothing else).\n"
     "- Preserve all content and names and multilingual Unicode as-is, but remove/ignore markup like HTML tags, CSS, JS.\n"
@@ -269,7 +269,7 @@ _CLEAN_PROMPT_TEMPLATE = (
     "- Keep the original order.\n"
     "- Remove leftover artifacts (anchors, scripts, styles, boilerplate).\n"
     "- Ensure paragraphs are readable with sensible sentence boundaries.\n"
-    "- Do not overuse newlines- that would just waste whitespace on the printed paper.\n"
+    "- Use pure txt instead of any sort of markdown syntax. Never use double newlines, single newlines are enough.\n"
     "Example (toy):\n"
     "INPUT: `<h1>Title</h1>Hi <b>there</b>!` → OUTPUT:\n"
     "```txt\nTitle. Hi there!\n```\n\n"
