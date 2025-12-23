@@ -8,7 +8,4 @@
 /printable
 /examples
 /relevant_raw.txt
-conversion_vl/
-conversion_vl/output.md
-conversion_vl/progress.jsonl
-conversion_vl/images/
+/conversion_vl
