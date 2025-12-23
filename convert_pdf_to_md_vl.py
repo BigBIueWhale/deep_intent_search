@@ -6,9 +6,10 @@
 #   python convert_pdf_to_md_vl.py /path/to/input.pdf
 #
 # Outputs (hard-coded):
-#   conversion/output.md
-#   conversion/progress.jsonl
-#   conversion/images/page_0001.png, ...
+#   conversion_vl/output.md
+#   conversion_vl/progress.jsonl
+#   conversion_vl/images/page_0001.png, ...
+#   conversion_vl/pages/000001.txt, ...
 #
 # Dependencies:
 #   pip install pymupdf pillow python-dotenv httpx
@@ -60,6 +61,7 @@ CONVERSION_DIR = Path("conversion_vl")
 PROGRESS_PATH = CONVERSION_DIR / "progress.jsonl"
 OUTPUT_MD_PATH = CONVERSION_DIR / "output.md"
 IMAGES_DIR = CONVERSION_DIR / "images"
+PAGES_DIR = CONVERSION_DIR / "pages"
 
 TARGET_LONG_SIDE_PX = 4096
 SUPERSAMPLE_FACTOR = 2.0  # render 2x, then downsample for crisp text/lines
@@ -103,6 +105,7 @@ def atomic_write_text(path: Path, content: str) -> None:
 def ensure_dirs() -> None:
     CONVERSION_DIR.mkdir(parents=True, exist_ok=True)
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    PAGES_DIR.mkdir(parents=True, exist_ok=True)
 
 def b64_of_file(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("ascii")
@@ -115,6 +118,28 @@ def _parse_jsonl_line(line: str, lineno: int) -> dict:
     if not isinstance(obj, dict):
         raise RuntimeError(f"progress.jsonl line {lineno} is not a JSON object.")
     return obj
+
+def page_md_path(page_number: int) -> Path:
+    # 1-based page_number -> 6-digit filename, Markdown content, .txt extension.
+    return PAGES_DIR / f"{page_number:06d}.txt"
+
+def write_page_md(page_number: int, md: str) -> None:
+    ensure_dirs()
+    out_path = page_md_path(page_number)
+    atomic_write_text(out_path, md.rstrip() + "\n")
+
+def rebuild_page_mds(completed: Dict[int, "PageDone"]) -> None:
+    ensure_dirs()
+    for page_index in sorted(completed.keys()):
+        pd = completed[page_index]
+        out_path = page_md_path(pd.page_number)
+        desired = pd.md.rstrip() + "\n"
+        if out_path.exists():
+            existing = out_path.read_text(encoding="utf-8", errors="strict")
+            if existing != desired:
+                atomic_write_text(out_path, desired)
+        else:
+            atomic_write_text(out_path, desired)
 
 
 # -----------------------------
@@ -298,6 +323,9 @@ def load_progress_or_init(meta_expected: Meta) -> Tuple[Meta, Dict[int, PageDone
         if sha256_text(pd.md) != pd.md_sha256:
             raise RuntimeError(f"Markdown sha256 mismatch for page_index={pi} (progress does not match content).")
 
+    # Ensure per-page .txt files are derived from progress (rebuild deterministically)
+    rebuild_page_mds(completed)
+
     # Ensure output.md is derived from progress (rebuild deterministically)
     rebuilt = build_output_md(meta_expected, completed)
     if OUTPUT_MD_PATH.exists():
@@ -334,21 +362,12 @@ def append_progress_page_done(pd: PageDone) -> None:
 
 def build_output_md(meta: Meta, completed: Dict[int, PageDone]) -> str:
     parts: List[str] = []
-    parts.append(
-        "<!--\n"
-        "  GENERATED FILE — DO NOT EDIT BY HAND\n"
-        f"  input_pdf_sha256: {meta.input_pdf_sha256}\n"
-        f"  page_count: {meta.page_count}\n"
-        f"  renderer: long_side={meta.target_long_side_px}px supersample={meta.supersample_factor}\n"
-        f"  images: {meta.image_format}\n"
-        "-->\n"
-    )
     for page_index in sorted(completed.keys()):
         pd = completed[page_index]
-        parts.append(f"\n\n<!-- BEGIN_PAGE {pd.page_number:04d} -->\n")
-        parts.append(pd.md.rstrip() + "\n")
-        parts.append(f"<!-- END_PAGE {pd.page_number:04d} -->\n")
-    return "".join(parts)
+        if parts:
+            parts.append("\n\n")
+        parts.append(pd.md.rstrip())
+    return "".join(parts).rstrip() + "\n"
 
 
 # -----------------------------
@@ -621,11 +640,15 @@ def main() -> None:
         # Persist progress first (source of truth)
         append_progress_page_done(pd)
 
+        # Write per-page markdown file
+        write_page_md(page_number, md)
+
         # Update in-memory and rebuild output.md deterministically
         completed[page_index] = pd
         rebuilt = build_output_md(meta, completed)
         atomic_write_text(OUTPUT_MD_PATH, rebuilt)
 
+        print(f"[info] Wrote: {page_md_path(page_number)}")
         print(f"[info] Wrote: {OUTPUT_MD_PATH} (completed {len(completed)}/{page_count})")
 
     print("\n[done] Conversion complete.")
