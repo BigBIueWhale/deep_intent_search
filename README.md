@@ -112,6 +112,10 @@ OLLAMA_MODEL_ANOTHER_LONG_CONTEXT=qwen3-vl:32b-instruct
 # OLLAMA_MODEL_SMARTEST:
 #   Used by deep_search.py, rerank.py. The highest quality model that fits on our GPU.
 OLLAMA_MODEL_SMARTEST=qwen3:32b
+
+# OLLAMA_MODEL_VISION
+#   Used by convert_pdf_to_md_vl.py
+OLLAMA_MODEL_VISION=qwen3-vl:32b-thinking
 ```
 
 > Pull models once:

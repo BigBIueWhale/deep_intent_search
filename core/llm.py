@@ -95,6 +95,9 @@ def get_model_name(role: str | None = None) -> str:
 
         # 4. SMARTEST: Escalation model for difficult instruction following or final polish.
         "smartest": ["OLLAMA_MODEL_SMARTEST"],
+
+        # 5. VISION
+        "vision": ["OLLAMA_MODEL_VISION"],
     }
 
     allowed = ", ".join(sorted(roles))
