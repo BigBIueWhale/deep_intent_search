@@ -460,6 +460,37 @@ def stream_process_output_to_console_and_log(proc: subprocess.Popen, log_fp) -> 
     captured = bytearray()
     assert proc.stdout is not None
 
+    terminal_write_failed = False
+
+    def _write_to_terminal(chunk: bytes) -> None:
+        nonlocal terminal_write_failed
+
+        # Prefer binary write when available (real terminal / most CLIs).
+        try:
+            sys.stdout.buffer.write(chunk)
+            sys.stdout.buffer.flush()
+            return
+        except Exception:
+            pass
+
+        # Fall back to text write if stdout has no .buffer (some IDEs/wrappers).
+        try:
+            sys.stdout.write(chunk.decode("utf-8", errors="replace"))
+            sys.stdout.flush()
+            return
+        except Exception:
+            # Do not spam; warn once and continue logging.
+            if not terminal_write_failed:
+                terminal_write_failed = True
+                try:
+                    print(
+                        "[warn] Failed to write converter output to terminal stdout; continuing (log file still written).",
+                        file=sys.stderr,
+                    )
+                    sys.stderr.flush()
+                except Exception:
+                    pass
+
     try:
         while True:
             chunk = proc.stdout.read(4096)
@@ -468,12 +499,7 @@ def stream_process_output_to_console_and_log(proc: subprocess.Popen, log_fp) -> 
             captured += chunk
 
             # terminal
-            try:
-                sys.stdout.buffer.write(chunk)
-                sys.stdout.buffer.flush()
-            except Exception:
-                # If terminal write fails, we still keep logging and fail later if needed.
-                pass
+            _write_to_terminal(chunk)
 
             # log
             log_fp.write(chunk)
@@ -551,7 +577,15 @@ def run_one_pdf(
         with log_path.open("ab") as log_fp:
             log_fp.write(f"\n\n===== RUN @ {utc_now_iso()} =====\n".encode("utf-8"))
 
-            cmd = [sys.executable, str(converter_script), str(pdf_abs)]
+            # IMPORTANT:
+            # - When a Python program's stdout is piped (stdout=PIPE), it is typically block-buffered,
+            #   which delays output until many lines accumulate.
+            # - Running the converter with -u (unbuffered) makes output appear immediately, like a manual run.
+            cmd = [sys.executable, "-u", str(converter_script), str(pdf_abs)]
+
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
+
             proc: Optional[subprocess.Popen] = None
             captured: bytes = b""
 
@@ -559,6 +593,7 @@ def run_one_pdf(
                 proc = subprocess.Popen(
                     cmd,
                     cwd=str(repo_root),
+                    env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     bufsize=0,  # unbuffered pipe from the child to us (we still stream carefully)
