@@ -27,6 +27,7 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -70,7 +71,7 @@ IMAGE_FMT = "PNG"
 IMAGE_EXT = ".png"
 PNG_COMPRESS_LEVEL = 6  # balanced: not too slow, still smaller
 
-MAX_LLM_ATTEMPTS = 3
+MAX_LLM_ATTEMPTS = 10
 
 # Sanity bounds (runaway / nonsense detection)
 MAX_MD_CHARS_PER_PAGE = 400_000
@@ -508,7 +509,11 @@ def llm_convert_page(client_http, image_b64: str, page_number_4d: str) -> Tuple[
     """
     Returns (md, attempts_used).
     Retries on marker/validation failures or truncation (done_reason=length).
+    Also retries on transient LLM/Ollama/chat transport errors thrown by chat_complete.
     """
+
+    last_chat_exc: Exception | None = None
+
     for attempt in range(1, MAX_LLM_ATTEMPTS + 1):
         messages = [
             {"role": "system", "content": system_prompt()},
@@ -519,19 +524,44 @@ def llm_convert_page(client_http, image_b64: str, page_number_4d: str) -> Tuple[
             },
         ]
 
-        resp = chat_complete(
-            messages=messages,
-            role="vision",
-            client=client_http,
-            max_completion_tokens=34000, # ignored for thinking models; harmless
-            please_no_thinking=False,
-            require_json=False
-        )
+        # Guard chat_complete so transient Ollama/LLM issues don't crash the whole run.
+        # Important debug info: print how long chat_complete took even when it fails.
+        t0 = time.monotonic()
+        try:
+            resp = chat_complete(
+                messages=messages,
+                role="vision",
+                client=client_http,
+                max_completion_tokens=34000,  # ignored for thinking models; harmless
+                please_no_thinking=False,
+                require_json=False,
+            )
+        except Exception as e:
+            elapsed_s = time.monotonic() - t0
+            last_chat_exc = e
+            print(
+                f"[warn] chat_complete exception (attempt {attempt}/{MAX_LLM_ATTEMPTS}) "
+                f"after {elapsed_s:.2f}s: {e!r}"
+            )
 
+            if attempt >= MAX_LLM_ATTEMPTS:
+                raise RuntimeError(
+                    f"chat_complete failed after {MAX_LLM_ATTEMPTS} attempts; refusing to proceed.\n"
+                    f"Last exception: {e!r}"
+                ) from e
+
+            # Be patient with LLM/Ollama hiccups: small exponential backoff.
+            backoff_s = min(2 ** (attempt - 1), 8)
+            print(f"[warn] Retrying after {backoff_s}s due to LLM/Ollama error.")
+            time.sleep(backoff_s)
+            continue
+
+        # Normal success path
         stats = print_stats(resp)
         if stats is not None:
             print(stats)
         else:
+            # Keep the existing behavior; stats can be missing depending on client/response shape.
             print("[warn] stats unavailable (missing duration/count fields)")
 
         if getattr(resp, "ran_out_of_tokens", False):
@@ -540,7 +570,19 @@ def llm_convert_page(client_http, image_b64: str, page_number_4d: str) -> Tuple[
             print("[warn] LLM hit done_reason=length; retrying.")
             continue
 
-        text = resp.message.content or ""
+        text = ""
+        try:
+            text = (resp.message.content or "")
+        except Exception:
+            # Extremely defensive: if response shape is unexpected, treat it like a transient LLM issue.
+            if attempt >= MAX_LLM_ATTEMPTS:
+                raise RuntimeError(
+                    f"LLM response missing expected fields after {MAX_LLM_ATTEMPTS} attempts; refusing to proceed.\n"
+                    f"Last chat exception: {last_chat_exc!r}"
+                )
+            print(f"[warn] Unexpected response shape (attempt {attempt}/{MAX_LLM_ATTEMPTS}); retrying.")
+            continue
+
         try:
             md = extract_md(text, page_number_4d)
             md_sanity_check(md)
