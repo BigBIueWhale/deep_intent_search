@@ -120,7 +120,7 @@ _QWEN3_32B_BASE_OPTIONS = {
     # plus 2 response tokens.
     # Avoid the issue of Ollama call getting stuck waiting for almost 2 hours,
     # grinding the GPU for nothing on gibberish.
-    "num_predict": 11264,
+    "num_predict": 28672,
 
     # Shared sampling/guardrails for both modes
     "top_k": 20,
@@ -153,7 +153,7 @@ _QWEN3_30B_A3B_THINKING_OPTIONS = {
     # Good context length value for 32GB VRAM and flash attention enabled
     # Ends up using ~31 GB in "ollama ps" when context length is full.
     "num_ctx": 130000,
-    "num_predict": 49152, # 30b-a3b tends to think a lot
+    "num_predict": 81920,
     "temperature": 0.6,
     "top_k": 20,
     "top_p": 0.95,
@@ -169,13 +169,7 @@ _QWEN3_30B_A3B_INSTRUCT_OPTIONS = {
     # Good context length value for 32GB VRAM and flash attention enabled
     # Keep identical to the thinking variant per requirements.
     "num_ctx": 130000,
-    # Instruct variants don't "think" as long; you can still override at call-site if needed.
-    # Using the "magic number" 16,384 instead of the 11,264 previously written here —
-    # because the official page for Qwen3-30B-A3B-Instruct-2507 says:
-    #   "Adequate Output Length: We recommend using an output length of 16,384 tokens for most queries,
-    #    which is adequate for instruct models."
-    # Source: https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507
-    "num_predict": 16384,
+    "num_predict": 81920,
     # Official guidance for Instruct-2507:
     "temperature": 0.7,
     "top_k": 20,
@@ -189,8 +183,7 @@ _QWEN3_30B_A3B_INSTRUCT_OPTIONS = {
 _GLM_4_32B_OPTIONS = {
     # We turn on full context capability of the model
     "num_ctx": 32768,
-    # Just a number to avoid infinite generation
-    "num_predict": 8192,
+    "num_predict": 28672,
 }
 
 _GEMMA3_27B_OPTIONS = {
@@ -213,7 +206,7 @@ _QWEN3_VL_32B_BASE_OPTIONS = {
     # plus 2 response tokens.
     # Avoid the issue of Ollama call getting stuck waiting for almost 2 hours,
     # grinding the GPU for nothing on gibberish.
-    "num_predict": 11264,
+    "num_predict": 34904,
 
     # Layers to offload, all of them.
     "num_gpu": 65,
