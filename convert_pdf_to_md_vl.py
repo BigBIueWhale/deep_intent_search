@@ -206,7 +206,6 @@ def load_progress_or_init(meta_expected: Meta) -> Tuple[Meta, Dict[int, PageDone
 
     in_pdf = require(meta_line, "input_pdf", "root")
     rendering = require(meta_line, "rendering", "root")
-    llm = require(meta_line, "llm", "root")
 
     file_path = require(in_pdf, "path", "input_pdf")
     file_sha = require(in_pdf, "sha256", "input_pdf")
@@ -506,6 +505,8 @@ def llm_convert_page(client_http, image_b64: str, page_number_4d: str) -> Tuple[
             role="vision",
             client=client_http,
             max_completion_tokens=34000, # ignored for thinking models; harmless
+            please_no_thinking=False,
+            require_json=False
         )
 
         stats = print_stats(resp)
