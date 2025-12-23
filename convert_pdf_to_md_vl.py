@@ -14,7 +14,7 @@
 #   pip install pymupdf pillow python-dotenv httpx
 #
 # Repo dependency:
-#   from core.llm import get_client, chat_complete, print_stats, get_model_name
+#   from core.llm import get_client, chat_complete, print_stats
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ except Exception as e:
         f"Import error: {e}"
     )
 
-from core.llm import get_client, chat_complete, print_stats, get_model_name
+from core.llm import get_client, chat_complete, print_stats
 
 
 # -----------------------------
@@ -132,8 +132,6 @@ class Meta:
     target_long_side_px: int
     supersample_factor: float
     image_format: str
-    model_role: str
-    model_name: str
     ollama_host: str | None
 
 @dataclass(frozen=True)
@@ -166,10 +164,6 @@ def write_initial_meta(meta: Meta) -> None:
             "target_long_side_px": meta.target_long_side_px,
             "supersample_factor": meta.supersample_factor,
             "image_format": meta.image_format,
-        },
-        "llm": {
-            "model_role": meta.model_role,
-            "model_name": meta.model_name,
         },
         "ollama": {
             "host": meta.ollama_host,
@@ -348,7 +342,6 @@ def build_output_md(meta: Meta, completed: Dict[int, PageDone]) -> str:
         f"  page_count: {meta.page_count}\n"
         f"  renderer: long_side={meta.target_long_side_px}px supersample={meta.supersample_factor}\n"
         f"  images: {meta.image_format}\n"
-        f"  llm: {meta.model_name}\n"
         "-->\n"
     )
     for page_index in sorted(completed.keys()):
