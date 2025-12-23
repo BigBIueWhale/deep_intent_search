@@ -213,7 +213,11 @@ Disclaimer: In the above Harry Potter search, `GPT-5-nano` actually marked 9 add
 
 ## Split the file(s)
 
-The input to the search are text file(s). Say you have a PDF- you'll have to first convert that into a text file. Use [convert_pdf_to_md_vl.py](./convert_pdf_to_md_vl.py) for this task (works great if the language is English).
+The input to the search are text file(s). Say you have a PDF- you'll have to first convert that into a text file.
+
+Use [convert_pdf_to_md_vl.py](./convert_pdf_to_md_vl.py) for this task (works great if the language is English). Get outputs at [./conversion_vl](./conversion_vl/)
+
+Alternatively, you can use [convert_all_pdfs.py](./convert_all_pdfs.py) to batch-run the conversion logic, and get outputs at [./all_pdfs](./all_pdfs)
 
 Use [semantic_splitter.py](./semantic_splitter.py) utility to create a folder at [./split](./split/).
 A group of files with naming convention `[000001.txt, 000002.txt, ...]` will be created.
