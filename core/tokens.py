@@ -18,6 +18,7 @@ def _get_tokenizer():
         if _tokenizer is None:
             if AutoTokenizer is not None:
                 try:
+                    # TODO: Doesn't work offline
                     _tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-32B")
                 except Exception:
                     _tokenizer = None
