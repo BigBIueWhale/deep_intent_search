@@ -143,7 +143,7 @@ The LLM is called with the metaparameters described in [./core/llm.py](./core/ll
 
 - `qwen3-vl:32b-thinking`- Thinks at least twice as much as `qwen3:32b`. Not that great, and dangerous due to its high VRAM consumption (all those thinking tokens come dangerously close to the context length).
 
-- `gpt-oss-20b` is supported because it's really not that bad (on newer versions of Ollama since they fixed format issues), and gives us 128k context window within only ~17GB of VRAM.
+- `gpt-oss:20b` is supported because it's really not that bad (on newer versions of Ollama since they fixed format issues), and gives us 128k context window within only ~17GB of VRAM.
 
 - `JollyLlama/GLM-4-32B-0414-Q4_K_M` was an attempt to find a dense non-thinking model to be an `OLLAMA_MODEL_SPLITTER`, and it's definitely the most capable non-thinking model shown here that can fit on a single consumer GPU. Its high multilingual capabilities, and general world knowledge might prove useful.
 
