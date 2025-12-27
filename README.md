@@ -79,8 +79,14 @@ Create `./.env` with:
 # just forgets about our request, and leaves our script hanging forever.
 #OLLAMA_TIMEOUT_SECONDS=300
 
-# Controls how many tokens of surrounding text are given to the LLM around each 1024 token chunk, during deep_intent_search.py
-CONTEXT_WINDOW_SIZE_TOKENS=8192
+# Controls how many tokens of surrounding text are given to the LLM around each 1024 token chunk, during deep_intent_search.py.
+# There's an algorithm "select_stable_window_bounds()" that makes sure that
+# consecutive search prompts will mostly be cached by Ollama,
+# so you can increase this number to hundreds of thousands of tokens
+# while experiencing minimal performance hit. Number chosen here has to
+# fit within OLLAMA_MODEL_SMARTEST context window.
+# Normally 8192 is the smallest number to choose here.
+CONTEXT_WINDOW_SIZE_TOKENS=128000
 
 # Model selection (required)
 # You must set both variables explicitly. There is no fallback.
@@ -112,7 +118,7 @@ OLLAMA_MODEL_ANOTHER_LONG_CONTEXT=qwen3-vl:32b-instruct
 
 # OLLAMA_MODEL_SMARTEST:
 #   Used by deep_search.py, rerank.py. The highest quality model that fits on our GPU.
-OLLAMA_MODEL_SMARTEST=qwen3:32b
+OLLAMA_MODEL_SMARTEST=qwen3:30b-a3b-thinking-2507-q4_K_M
 
 # OLLAMA_MODEL_VISION
 #   Used by convert_pdf_to_md_vl.py
@@ -151,7 +157,7 @@ The LLM is called with the metaparameters described in [./core/llm.py](./core/ll
 
 - `qwen3:30b-a3b-instruct-2507-q4_K_M` is the fastest non-thinking model (that actually works and is useful) to be able to fit on a consumer GPU. The attempt was to use it for `semantic_splitter.py` because it doesn't possess hybrid thinking capabilities, `qwen3:30b-a3b-thinking-2507-q4_K_M` is a different model, which means it would require unloading from GPU and loading a different model. Its speed and reliability (as much as a non-thinking model can be reliable) might prove crucial for speeding-up operations in this project.
 
-- `qwen3:30b-a3b-instruct-2507-q4_K_M` does so much thinking, to compensate for its measly 3 billion active parameters. The 200 tok/sec generation speed (on RTX 5090) might prove useful. However, it usually ends up taking longer than `qwen3:32b` just because it thinks to much. Oh, and `qwen3:32b` is definitely smarter and more reliable- so unclear what use-case this model might have.
+- `qwen3:30b-a3b-thinking-2507-q4_K_M` does so much thinking, to compensate for its measly 3 billion active parameters. The 200 tok/sec generation speed (on RTX 5090) might prove useful. However, it usually ends up taking longer than `qwen3:32b` just because it thinks so much. Oh, and `qwen3:32b` is definitely smarter and more reliable. **However** this model has excellend `RULER` benchmark scores so it might literally be the key to solving the "I don't understand this chunk in isloation" problem that plauges `deep_search.py`!
 
 ## Search through the chunks
 First use [semantic_splitter.py](#split-the-files). Then once you have a folder [./split](./split/) containing ordered chunks of all the files, it's time to perform the deep search.
