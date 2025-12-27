@@ -93,6 +93,7 @@ CONTEXT_WINDOW_SIZE_TOKENS=8192
 #   - qwen3:30b-a3b-instruct-2507-q4_K_M
 #   - JollyLlama/GLM-4-32B-0414-Q4_K_M
 #   - gemma3:27b
+#   - gpt-oss:20b
 
 # OLLAMA_MODEL_HYBRID_REASONING:
 #   Used by semantic_splitter.py. Needs to support both fast instruction following

@@ -288,6 +288,18 @@ _SEED_OSS_36B_NO_THINK_OPTIONS = {
     "top_p": 0.95,
 }
 
+# Advanced parameters for gpt-oss:20b, applied on every request.
+# NOTE: GPT-OSS "reasoning effort" is controlled via the top-level `think` field on /api/chat
+# (expects one of: "low", "medium", "high"). We always run in "high".
+_GPT_OSS_20B_OPTIONS = {
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "top_k": 0,
+    # Ollama uses `num_predict` (not `max_tokens`) to cap generation; -1 means unlimited.
+    "num_predict": -1,
+    "num_ctx": 131072,
+}
+
 def get_ollama_options(model: str, please_no_thinking: bool, has_images: bool = False) -> dict:
     if model == "qwen3:32b":
         return dict(
@@ -313,6 +325,8 @@ def get_ollama_options(model: str, please_no_thinking: bool, has_images: bool = 
             if please_no_thinking
             else _SEED_OSS_36B_THINK_OPTIONS
         )
+    if model == "gpt-oss:20b":
+        return dict(_GPT_OSS_20B_OPTIONS)
     raise ValueError(
         f"Unrecognized OLLAMA_MODEL '{model}'. See README for .env options"
     )
@@ -323,6 +337,7 @@ def _supports_thinking(model: str) -> bool:
         "qwen3:30b-a3b-thinking-2507-q4_K_M",
         "qwen3-vl:32b-thinking",
         "milkey/Seed-OSS-36B-Instruct:q4_K_M",
+        "gpt-oss:20b",
     }
 
 def _supports_think_toggle(model: str) -> bool:
@@ -415,7 +430,11 @@ def chat_complete(
 
     # Handle think parameter
     if can_think:
-        if "seed" in model.lower():
+        if model.startswith("gpt-oss"):
+            # GPT-OSS requires think levels ("low" | "medium" | "high"); booleans are ignored.
+            # We always use "high" reasoning mode.
+            payload["think"] = "high"
+        elif "seed" in model.lower():
             if disable_think:
                 payload["think"] = False
             else:
