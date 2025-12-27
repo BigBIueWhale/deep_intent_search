@@ -79,7 +79,7 @@ Create `./.env` with:
 # just forgets about our request, and leaves our script hanging forever.
 #OLLAMA_TIMEOUT_SECONDS=300
 
-# Controls how many tokens of surrounding text are given to the LLM around each 1024 token chunk
+# Controls how many tokens of surrounding text are given to the LLM around each 1024 token chunk, during deep_intent_search.py
 CONTEXT_WINDOW_SIZE_TOKENS=8192
 
 # Model selection (required)

@@ -15,7 +15,7 @@ load_dotenv()
 client = get_client()
 
 # Get context window size from environment variable, with a default.
-CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 8192))
+SEMANTIC_SPLITTER_CONTEXT_WINDOW = 8192
 MAX_TOKENS_PER_CHUNK = 1024
 
 # For durable JSONL segments (same delimiter convention as deep_search.py)
@@ -325,7 +325,7 @@ def ensure_meta(progress_path: str, file_index: int, path: str, size_chars: int)
             "path": path,
             "size_chars": size_chars,
             "max_tokens": MAX_TOKENS_PER_CHUNK,
-            "context_window": CONTEXT_WINDOW_SIZE_TOKENS,
+            "context_window": SEMANTIC_SPLITTER_CONTEXT_WINDOW,
         }
         write_json_record_append(progress_path, meta)
         return meta
@@ -340,8 +340,8 @@ def ensure_meta(progress_path: str, file_index: int, path: str, size_chars: int)
         errs.append(f"- size_chars mismatch: progress={existing_meta.get('size_chars')} vs current={size_chars}")
     if existing_meta.get("max_tokens") != MAX_TOKENS_PER_CHUNK:
         errs.append(f"- max_tokens mismatch: progress={existing_meta.get('max_tokens')} vs current={MAX_TOKENS_PER_CHUNK}")
-    if existing_meta.get("context_window") != CONTEXT_WINDOW_SIZE_TOKENS:
-        errs.append(f"- context_window mismatch: progress={existing_meta.get('context_window')} vs current={CONTEXT_WINDOW_SIZE_TOKENS}")
+    if existing_meta.get("context_window") != SEMANTIC_SPLITTER_CONTEXT_WINDOW:
+        errs.append(f"- context_window mismatch: progress={existing_meta.get('context_window')} vs current={SEMANTIC_SPLITTER_CONTEXT_WINDOW}")
 
     if errs:
         msg = "Refusing to resume due to incompatible progress file:\n" + "\n".join(errs) + \
@@ -372,9 +372,9 @@ def propose_split_index_for_segment(full_text: str, seg_lo: int, seg_hi: int, fi
     segment = full_text[seg_lo:seg_hi]
     # If the segment is larger than the window, use a central window for the LLM.
     seg_token_count = count_tokens(segment)
-    if seg_token_count > CONTEXT_WINDOW_SIZE_TOKENS:
-        print(f"Text token count ({seg_token_count}) exceeds window size ({CONTEXT_WINDOW_SIZE_TOKENS}). Creating a central window for the LLM.")
-        section_text = create_llm_window_from_center(segment, CONTEXT_WINDOW_SIZE_TOKENS)
+    if seg_token_count > SEMANTIC_SPLITTER_CONTEXT_WINDOW:
+        print(f"Text token count ({seg_token_count}) exceeds window size ({SEMANTIC_SPLITTER_CONTEXT_WINDOW}). Creating a central window for the LLM.")
+        section_text = create_llm_window_from_center(segment, SEMANTIC_SPLITTER_CONTEXT_WINDOW)
     else:
         section_text = segment
 

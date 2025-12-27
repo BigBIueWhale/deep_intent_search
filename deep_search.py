@@ -17,9 +17,9 @@ load_dotenv()
 # Initialize the Ollama client (no raw HTTP; library only).
 CLIENT = get_client()
 
-# Get context window size from environment variable, with a default.
-# (This governs how much *surrounding text* we feed around the chunk of interest, not the model's num_ctx.)
-CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ.get("CONTEXT_WINDOW_SIZE_TOKENS", 8192))
+# Get context window size from environment variable. This governs how much *surrounding text*
+# we feed around the chunk of interest, not the model's num_ctx.
+CONTEXT_WINDOW_SIZE_TOKENS = int(os.environ["CONTEXT_WINDOW_SIZE_TOKENS"])
 
 RECORD_DELIM = "\x1e"
 
