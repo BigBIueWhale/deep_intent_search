@@ -1,0 +1,3 @@
+find /home/user/Downloads/nt5src -type f \( -iname "*.c" -o -iname "*.cpp" -o -iname "*.cxx" -o -iname "*.h" -o -iname "*.hpp" -o -iname "*.hxx" \) -print > nt5_files_list.txt
+
+python3 semantic_splitter.py --files-list ./nt5_files_list.txt
