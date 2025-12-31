@@ -281,9 +281,9 @@ def check_relevance_with_llm(
 {ctx}
 --- BACKGROUND KNOWLEDGE ENDS ---
 
-You are a highly focused research assistant. Your task is to determine if a specific, isolated section of text is relevant to a user's query.
+You are a highly focused research assistant. Your task is to determine if a specific, section of text is relevant to a user's query.
 
-I will provide you with a large context of surrounding text to help you understand the overall topic. However, your final judgment must be based ONLY on the content of the **"SECTION OF INTEREST"** provided at the very end. The context is for reasoning, but the decision must be about the specific section.
+I will provide you with a large context of surrounding text to help you understand the overall topic. However, your final judgment must be based ONLY on the meaning of the contents in **"SECTION OF INTEREST"** provided at the very end. The context is for reasoning and to understand the actual significance of the information portrayed.
 
 --- USER QUERY BEGINS ---
 {query}
@@ -293,8 +293,9 @@ I will provide you with a large context of surrounding text to help you understa
 {context}
 --- CONTEXT ENDS ---
 
-Now, focusing exclusively on the following text, is there anything in this specific section
-that fits the user's query **as it is written**?
+Focusing on the following text, does the meaning of this text or anything within it fit the user's query **as it is written**?
+
+The user wants you to understand the section relative to the context given. No false positives, and more importantly if the section strictly speaking matches the criteria, don't miss it!
 
 --- SECTION OF INTEREST BEGINS ({chunk_filename}) ---
 {chunk_of_interest}

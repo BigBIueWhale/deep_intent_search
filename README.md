@@ -86,7 +86,7 @@ Create `./.env` with:
 # while experiencing minimal performance hit. Number chosen here has to
 # fit within OLLAMA_MODEL_SMARTEST context window.
 # Normally 8192 is the smallest number to choose here.
-CONTEXT_WINDOW_SIZE_TOKENS=128000
+CONTEXT_WINDOW_SIZE_TOKENS=100000
 
 # Model selection (required)
 # You must set both variables explicitly. There is no fallback.
