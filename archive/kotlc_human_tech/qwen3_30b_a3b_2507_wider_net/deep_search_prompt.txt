@@ -1,0 +1,120 @@
+python3 deep_search.py \
+    --query "Interested in example of human technology being presented as equal or superior to magic, or anything that will make me feel proud of human species technology. Technopath is not considered human. Elven tech weapons is not considered human. Only interested in stuff that essentially wouldn't work without the human tech involved, and has to be impressive- a worthy opponent to this elven magic and tech." \
+    --ctx "$(cat <<'EOF'
+>> System Entry: Narrative Database & World Simulation
+>> Source Material: Keeper of the Lost Cities (Series)
+>> Author: Shannon Messenger
+>> Purpose: Comprehensive lore retention, character network mapping, and conflict analysis.
+
+[Section 1: Fundamental Cosmology & Physics]
+The universe is bifurcated into two distinct operational zones primarily defined by species habitation and light mechanics.
+
+1. The Lost Cities (Elvin World):
+   - Hidden from human perception through advanced light refraction barriers and void-masking.
+   - Locations: Eternalia (Capital), Atlantis (Underwater), Lumenaria (Diplomatic Hub), Havenfield (Animal Preserve), Foxfire (Elite Academy), Exile (Prison).
+   - Technology: Biologically integrated. Reliance on crystals for energy and data storage. "Imparters" serve as communication devices. "Pathfinders" focus light for transport.
+   - Physics of Travel: "Light Leaping." Entities deconstruct their molecular structure, ride light beams, and reconstruct at the destination.
+   - Risks: "Fading" occurs when mental concentration breaks during a leap, causing the body to lose cohesion and cease to exist. "Nexuses" are safety clamps worn by children to maintain atomic integrity.
+
+2. The Forbidden Cities (Human World):
+   - The modern Earth as known to humans.
+   - Status: Restricted zone. Elves view humans as violent, destructive, and primitive.
+   - Interaction: Strictly prohibited except for authorized observation.
+
+[Section 2: Biological & Magical Systems]
+Magic is classified as "Special Abilities," which are genetic traits manifesting in adolescence. They are biological, not mystical, rooted in DNA manipulation and mental energy.
+
+1. The Species Hierarchy:
+   - Elves: The dominant geopolitical force. Biologically immortal (halt aging), vegetarian, pacifist (mostly).
+   - Ogres: Militaristic, physically dense, non-verbal (use sign language), creating viruses (The Plague). Current tension: Cold War turning hot.
+   - Goblins: High-pitched voices, warrior caste, strictly honor-bound bodyguards to Elves.
+   - Gnomes: Connected to plant life (photosynthesis), mutable physiology (can turn into trees), servant class to Elves.
+   - Dwarves: Subterranean, lacking special abilities, manage the prison systems.
+
+2. Notable Elvin Abilities:
+   - Telepathy: Mind reading/communication. Rare "Cognate" bond allows two telepaths to share a consciousness, boosting power.
+   - Empathy: Sensing emotions (Keefe Sencen).
+   - Telekinesis: Moving matter.
+   - Vanishing: Invisibility (Biana Vacker).
+   - Technopathy: Manipulation of technology (Dex Dizznee).
+   - Shade: Manipulation of shadow/darkness (Tam Song).
+   - Hydrokinesis: Manipulation of water (Linh Song).
+   - Pyrodes: Control of fire. This is a "Forbidden Talent" because fire (Everblaze) consumes the very light Elves are made of.
+   - Inflicting: Weaponized projection of pain/negative emotion (Sophie Foster).
+
+[Section 3: Project Moonlark (The Protagonist Anomaly)]
+Subject: Sophie Foster
+Origin: Created in a test tube by the rebel group "The Black Swan."
+Biological Distinctiveness:
+   - DNA: A cocktail of elf and other species, including Alicorn (winged unicorn) DNA.
+   - Physicality: Brown eyes (elves have blue); allergic to Limbium (elvin medicine).
+   - Purpose: Designed to do what the Council cannot—break the rules to save the world.
+Power Set:
+   - Telepathy: Can breach impenetrable minds; infinite range.
+   - Polyglot: Instinctive understanding of all languages.
+   - Teleportation: Can leap through the void without light/crystals (derived from Alicorn DNA).
+   - Inflicting: Can incapacitate enemies with pain.
+   - Enhancer: Boosts the power of any elf she physically touches (manifested later in the narrative).
+
+[Section 4: Factional Geopolitics]
+The central conflict is a three-way struggle for the future of the species.
+
+1. The Council (The Establishment):
+   - Composition: 12 Ancient Councillors.
+   - Ideology: Extreme order, isolationism, fear of the unknown.
+   - Flaw: Their slowness to act and obsession with "proper behavior" allowed the villains to gain power.
+   - Key Members: Councillor Bronte (Ancient Inflictor, eventually supports Sophie), Councillor Kenric (Deceased, loved Sophie).
+
+2. The Black Swan (The Reformers):
+   - Ideology: The world is broken and requires radical intervention.
+   - Methodology: Genetic engineering, espionage, secrecy.
+   - Leadership: "The Collective" (Tiergan, Juline Dizznee, Mr. Forkle).
+   - Mr. Forkle: Sophie's creator. Revealed to be identical twins sharing one identity to double productivity. One twin is deceased; one remains.
+
+3. The Neverseen (The Extremists/Antagonists):
+   - Ideology: Elvin supremacy, overthrowing the Council, unlocking "Forbidden" arts.
+   - Methodology: Torture, kidnapping, assassination, bio-warfare.
+   - Key Assets: "Everblaze" (unquenchable fire), "Nightfall" (secret facilities), "Gorgodons" (mutant monsters).
+   - Leadership:
+     - Fintan: Ancient Pyrokinetic.
+     - Lady Gisela: Strategist, Keefe’s mother.
+     - Vespera: Ancient researcher, devoid of morality, experiments on humans.
+     - Alvar Vacker: Deep-cover spy within the noble Vacker family.
+
+[Section 5: Character Network & Dynamics]
+- Sophie & The Ruewens: Grady and Edaline adopted Sophie after their biological daughter, Jolie, was murdered by the Neverseen. They provide emotional stability.
+- Sophie & Keefe Sencen: Complex dynamic. Keefe uses humor to mask abuse from his father (Lord Cassius) and betrayal by his mother (Lady Gisela). He acts as a "Double Agent" to protect Sophie.
+- Sophie & The Vackers: The "Royal Family" of elves. Fitz Vacker is Sophie's romantic interest and telepathic partner, but struggles with anger/jealousy. Biana Vacker is a loyal friend/Vanisher. Alvar Vacker is the traitor who destroys the family unit.
+- The Song Twins: Tam (Shade) and Linh (Hydrokinetic). Formerly banished ("Exillium") for losing control of powers. Linh is the only one who can contain the flooding of Atlantis.
+- Silveny the Alicorn: The last female of her kind. Sophie is the only elf who can speak telepathically with her. Silveny represents hope and the timeline's stability.
+
+[Section 6: Narrative Logic & Chronological Progression]
+Phase 1: The Awakening
+Sophie is retrieved from the human world by Fitz. She attends Foxfire academy, struggles with fitting in, and manifests powerful abilities. The Black Swan reveals her origin. The Neverseen make first contact via kidnapping.
+
+Phase 2: The Mental Break
+Sophie discovers Silveny (Alicorn). Alden Vacker suffers a mental collapse ("Memory Break") caused by the Neverseen. Sophie heals him, proving she can fix broken minds (an ability opposite to Inflicting).
+
+Phase 3: The Escalation
+The Neverseen assassinate a Councillor using Everblaze. Sophie attempts to heal the villain Fintan to gain intel but fails. The group (Sophie, Keefe, Fitz, Dex, Biana) realizes the Council is incompetent and flees the Lost Cities to join the Black Swan.
+
+Phase 4: The Exile & Betrayal
+Living as fugitives, the group infiltrates Ogre territory to cure a plague. They discover the Ogres are allied with the Neverseen. Keefe discovers his mother is a villain. One of the Black Swan leaders (Calla, a gnome) sacrifices herself to save her species.
+
+Phase 5: The War Begins
+Sophie gains the "Enhancer" ability. A peace summit at the castle Lumenaria is bombed by the Neverseen. Mr. Forkle (one twin) is killed. The conflict spills into the human world: The Neverseen kidnap Sophie's human parents.
+
+Phase 6: The Sacrifice (Nightfall)
+To save her human parents, Sophie infiltrates a Neverseen base inside the underwater city of Atlantis.
+- The Cost: Her parents were tortured and experimented on. To save their sanity, Sophie must wipe their memories entirely.
+- The Sister: Sophie's human sister, Amy, chooses to have her memory wiped to stay safe with the parents.
+- Outcome: Sophie cuts the final tie to her human life. The Neverseen escape. Vespera is revealed as a major threat.
+
+[Section 7: Inventory of Critical Objects]
+- Cache: A marble-like sphere storing memories too dangerous for a mind to hold.
+- Starstone (Lodestar): A geometric crystal key required to access high-security Neverseen hideouts.
+- Soporidine: A sedative used by villains to incapacitate victims.
+- Spyball: A crystal sphere used for remote viewing/surveillance.
+- Panakes Tree: A magical tree created from a Gnome sacrifice; its petals cure plagues.
+EOF
+)"
