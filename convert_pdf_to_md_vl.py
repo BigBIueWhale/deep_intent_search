@@ -72,7 +72,7 @@ IMAGE_EXT = ".png"
 PNG_COMPRESS_LEVEL = 6  # balanced: not too slow, still smaller
 
 PRIMARY_VISION_ATTEMPTS = 3
-FALLBACK_VISION_ATTEMPTS = 7
+FALLBACK_VISION_ATTEMPTS = 3
 MAX_LLM_ATTEMPTS = PRIMARY_VISION_ATTEMPTS + FALLBACK_VISION_ATTEMPTS
 
 # Sanity bounds (runaway / nonsense detection)
@@ -438,46 +438,94 @@ def ensure_page_image(doc: fitz.Document, page_index: int) -> Tuple[Path, str, i
 # -----------------------------
 
 def system_prompt() -> str:
-    # Minimal, per your preference. Do not rely on system prompt behavior for qwen3-vl.
-    return "Convert the given page image into Markdown."
+    return "You are a meticulous document transcription specialist."
+
 
 def user_prompt(page_number_6d: str, attempt: int) -> str:
-    # Tight, page-scoped, marker-framed output.
-    # Attempt 2/3 slightly tighten behavior without adding “options”.
-    extra = ""
-    if attempt == 2:
-        extra = (
-            "\nCRITICAL:\n"
-            "- Output NOTHING outside the markers.\n"
-            "- Do not include any extra commentary.\n"
-        )
-    elif attempt >= 3:
-        extra = (
-            "\nCRITICAL:\n"
-            "- Output NOTHING outside the markers.\n"
-            "- If text is unreadable, write [illegible]. Do not refuse.\n"
-            "- Do not repeat content.\n"
+    """
+    Escalating prompt strategy: 3 levels of increasing specificity.
+    Resets when switching models (attempt 1-3 = vision, attempt 4-6 = vision_fallback).
+
+    Level 0: Professional request with clear structure.
+    Level 1: Add explicit warnings about generation bugs (not content shortcuts).
+    Level 2: DRACONIAN mechanical precision - full content, no generation bugs.
+    """
+    # Reset escalation level when switching from thinking to instruct model
+    if attempt <= PRIMARY_VISION_ATTEMPTS:
+        level = (attempt - 1) % 3
+    else:
+        level = (attempt - PRIMARY_VISION_ATTEMPTS - 1) % 3
+
+    # Common output format requirement
+    format_block = (
+        "OUTPUT FORMAT (must match exactly):\n"
+        f"<<<MD_START page={page_number_6d}>>>\n"
+        "(your markdown here)\n"
+        f"<<<MD_END page={page_number_6d}>>>\n"
+    )
+
+    if level == 0:
+        # Level 0: Professional, clear, structured
+        return (
+            f"Please convert this document page image to Markdown.\n"
+            f"Page number: {page_number_6d}\n\n"
+            "GUIDELINES:\n"
+            "- Preserve the reading order and document structure completely.\n"
+            "- Use proper Markdown: headings (#), lists (-), tables (|), code blocks (```).\n"
+            "- Transcribe ALL content - every row, every cell, every detail.\n"
+            "- For figures/diagrams: insert ![description](#) followed by\n"
+            "  > **Image description:** detailed description of visual content.\n"
+            "- Do not invent content. Transcribe only what is visible.\n"
+            "- If the page is blank, output: <!-- PAGE BLANK -->\n\n"
+            f"{format_block}"
         )
 
-    return (
-        f"Convert this single PAGE IMAGE into Markdown.\n"
-        f"Page number: {page_number_6d}\n\n"
-        "Rules:\n"
-        "- Preserve reading order.\n"
-        "- Preserve headings, lists, tables (Markdown tables), and code blocks.\n"
-        "- Do not invent content not visible on the page.\n"
-        "- Describe images/figures on the page in great detail:\n"
-        "  * Insert: ![ALT TEXT](#) where the figure appears.\n"
-        "  * Immediately after, add:\n"
-        "    > **Image description:** ...\n"
-        "- If the page is blank, output exactly:\n"
-        "  <!-- PAGE BLANK -->\n\n"
-        "Output format (MUST match exactly):\n"
-        f"<<<MD_START page={page_number_6d}>>>\n"
-        "(Markdown for this page only)\n"
-        f"<<<MD_END page={page_number_6d}>>>\n"
-        + extra
-    )
+    elif level == 1:
+        # Level 1: Add warnings about generation bugs, emphasize completeness
+        return (
+            f"I need a COMPLETE and accurate Markdown transcription of this document page.\n"
+            f"Page number: {page_number_6d}\n\n"
+            "REQUIREMENTS:\n"
+            "- Transcribe ALL content faithfully - every heading, paragraph, table row, and cell.\n"
+            "- Preserve reading order and logical structure.\n"
+            "- Use Markdown syntax: # headings, - lists, | tables |, ``` code ```.\n"
+            "- For figures: ![alt text](#) then > **Image description:** ...\n"
+            "- Tables must include ALL rows and ALL columns - do not abbreviate.\n"
+            "- Do not add commentary outside the content markers.\n"
+            "- If blank: <!-- PAGE BLANK -->\n\n"
+            "IMPORTANT - AVOID GENERATION BUGS:\n"
+            "- Your output must contain EXACTLY ONE start marker and ONE end marker.\n"
+            "- Do not get stuck outputting the same character or word infinitely.\n"
+            "- Each table cell should be output exactly once.\n"
+            "- After completing the table, MOVE ON to the next content.\n\n"
+            f"{format_block}"
+        )
+
+    else:
+        # Level 2: DRACONIAN precision - full content demanded, mechanical bug prevention
+        return (
+            f"CRITICAL TRANSCRIPTION - Page {page_number_6d}\n\n"
+            "I am converting this technical manual to an accessible format.\n"
+            "This page contains important reference information that MUST be\n"
+            "transcribed COMPLETELY and ACCURATELY. Every detail matters.\n\n"
+            "CONTENT REQUIREMENTS (NON-NEGOTIABLE):\n"
+            "- Transcribe 100% of visible text, tables, and annotations.\n"
+            "- Tables: output EVERY row and EVERY column. No summarizing.\n"
+            "- Preserve exact values, labels, and cell contents.\n"
+            "- Use Markdown: # headings, - bullets, | table | cells |, ``` code ```.\n"
+            "- For figures: ![description](#) then > **Image description:** ...\n"
+            "- If blank page: <!-- PAGE BLANK -->\n\n"
+            "MECHANICAL REQUIREMENTS (CRITICAL):\n"
+            "- Output EXACTLY ONE <<<MD_START page=XXXXXX>>> marker.\n"
+            "- Output EXACTLY ONE <<<MD_END page=XXXXXX>>> marker.\n"
+            "- Nothing before the start marker. Nothing after the end marker.\n"
+            "- Do NOT fall into infinite loops outputting the same token.\n"
+            "- After each table row, proceed to the NEXT row, then eventually END the table.\n"
+            "- Once table is complete, output the closing |, then move to next content.\n"
+            "- The response MUST terminate with the end marker. Not optional.\n\n"
+            "Take your time. Accuracy and completeness are paramount.\n\n"
+            f"{format_block}"
+        )
 
 def extract_md(response_text: str, page_number_6d: str) -> str:
     starts = [m for m in MD_START_RE.finditer(response_text) if m.group(1) == page_number_6d]
