@@ -37,7 +37,7 @@ def _base_url() -> str:
 def _request_timeout_seconds() -> float:
     # Hard ceiling so calls cannot hang forever.
     # You can override in .env; defaults are generous for large models.
-    return float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "480"))  # 8 minutes
+    return float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "900"))  # 15 minutes
 
 
 # --- Public API compatibility layer ---
