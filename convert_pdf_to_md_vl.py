@@ -71,7 +71,9 @@ IMAGE_FMT = "PNG"
 IMAGE_EXT = ".png"
 PNG_COMPRESS_LEVEL = 6  # balanced: not too slow, still smaller
 
-MAX_LLM_ATTEMPTS = 10
+PRIMARY_VISION_ATTEMPTS = 3
+FALLBACK_VISION_ATTEMPTS = 7
+MAX_LLM_ATTEMPTS = PRIMARY_VISION_ATTEMPTS + FALLBACK_VISION_ATTEMPTS
 
 # Sanity bounds (runaway / nonsense detection)
 MAX_MD_CHARS_PER_PAGE = 400_000
@@ -510,11 +512,15 @@ def llm_convert_page(client_http, image_b64: str, page_number_6d: str) -> Tuple[
     Returns (md, attempts_used).
     Retries on marker/validation failures or truncation (done_reason=length).
     Also retries on transient LLM/Ollama/chat transport errors thrown by chat_complete.
+
+    Fallback: after PRIMARY_VISION_ATTEMPTS failures, switches to vision_fallback role.
     """
 
     last_chat_exc: Exception | None = None
 
     for attempt in range(1, MAX_LLM_ATTEMPTS + 1):
+        role = "vision" if attempt <= PRIMARY_VISION_ATTEMPTS else "vision_fallback"
+
         messages = [
             {"role": "system", "content": system_prompt()},
             {
@@ -530,7 +536,7 @@ def llm_convert_page(client_http, image_b64: str, page_number_6d: str) -> Tuple[
         try:
             resp = chat_complete(
                 messages=messages,
-                role="vision",
+                role=role,
                 client=client_http,
                 max_completion_tokens=34000,  # ignored for thinking models; harmless
                 please_no_thinking=False,

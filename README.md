@@ -123,6 +123,10 @@ OLLAMA_MODEL_SMARTEST=qwen3:30b-a3b-thinking-2507-q4_K_M
 # OLLAMA_MODEL_VISION
 #   Used by convert_pdf_to_md_vl.py
 OLLAMA_MODEL_VISION=qwen3-vl:32b-thinking
+
+# OLLAMA_MODEL_VISION_FALLBACK
+#   Used by convert_pdf_to_md_vl.py after PRIMARY_VISION_ATTEMPTS failures.
+OLLAMA_MODEL_VISION_FALLBACK=qwen3-vl:32b-instruct
 ```
 
 > Pull models once:

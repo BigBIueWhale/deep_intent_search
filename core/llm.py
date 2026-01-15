@@ -98,6 +98,9 @@ def get_model_name(role: str | None = None) -> str:
 
         # 5. VISION
         "vision": ["OLLAMA_MODEL_VISION"],
+
+        # 6. VISION FALLBACK: Non-thinking vision model for when primary hits context limits.
+        "vision_fallback": ["OLLAMA_MODEL_VISION_FALLBACK"],
     }
 
     allowed = ", ".join(sorted(roles))
