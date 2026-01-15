@@ -74,10 +74,10 @@ Create `./.env` with:
 #OLLAMA_HOST=172.17.0.1:11434
 
 # Optional: Customize timeout value in seconds for each Ollama request
-# Defaults to five minutes.
+# Defaults to eight minutes.
 # This functionality is required to avoid Ollama bug where it sometimes
 # just forgets about our request, and leaves our script hanging forever.
-#OLLAMA_TIMEOUT_SECONDS=300
+#OLLAMA_TIMEOUT_SECONDS=480
 
 # Controls how many tokens of surrounding text are given to the LLM around each 1024 token chunk, during deep_intent_search.py.
 # There's an algorithm "select_stable_window_bounds()" that makes sure that
