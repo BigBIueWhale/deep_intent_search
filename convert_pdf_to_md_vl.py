@@ -77,8 +77,8 @@ MAX_LLM_ATTEMPTS = 10
 MAX_MD_CHARS_PER_PAGE = 400_000
 
 
-MD_START_RE = re.compile(r"<<<MD_START\s+page=(\d{4})>>>")
-MD_END_RE = re.compile(r"<<<MD_END\s+page=(\d{4})>>>")
+MD_START_RE = re.compile(r"<<<MD_START\s+page=(\d{6})>>>")
+MD_END_RE = re.compile(r"<<<MD_END\s+page=(\d{6})>>>")
 
 
 # -----------------------------
@@ -416,7 +416,7 @@ def render_page_to_4k_png(doc: fitz.Document, page_index: int, out_path: Path) -
 
 
 def ensure_page_image(doc: fitz.Document, page_index: int) -> Tuple[Path, str, int, int]:
-    img_path = IMAGES_DIR / f"page_{page_index+1:04d}{IMAGE_EXT}"
+    img_path = IMAGES_DIR / f"page_{page_index+1:06d}{IMAGE_EXT}"
 
     if img_path.exists():
         with Image.open(img_path) as im:
@@ -439,7 +439,7 @@ def system_prompt() -> str:
     # Minimal, per your preference. Do not rely on system prompt behavior for qwen3-vl.
     return "Convert the given page image into Markdown."
 
-def user_prompt(page_number_4d: str, attempt: int) -> str:
+def user_prompt(page_number_6d: str, attempt: int) -> str:
     # Tight, page-scoped, marker-framed output.
     # Attempt 2/3 slightly tighten behavior without adding “options”.
     extra = ""
@@ -459,7 +459,7 @@ def user_prompt(page_number_4d: str, attempt: int) -> str:
 
     return (
         f"Convert this single PAGE IMAGE into Markdown.\n"
-        f"Page number: {page_number_4d}\n\n"
+        f"Page number: {page_number_6d}\n\n"
         "Rules:\n"
         "- Preserve reading order.\n"
         "- Preserve headings, lists, tables (Markdown tables), and code blocks.\n"
@@ -471,26 +471,26 @@ def user_prompt(page_number_4d: str, attempt: int) -> str:
         "- If the page is blank, output exactly:\n"
         "  <!-- PAGE BLANK -->\n\n"
         "Output format (MUST match exactly):\n"
-        f"<<<MD_START page={page_number_4d}>>>\n"
+        f"<<<MD_START page={page_number_6d}>>>\n"
         "(Markdown for this page only)\n"
-        f"<<<MD_END page={page_number_4d}>>>\n"
+        f"<<<MD_END page={page_number_6d}>>>\n"
         + extra
     )
 
-def extract_md(response_text: str, page_number_4d: str) -> str:
-    starts = [m for m in MD_START_RE.finditer(response_text) if m.group(1) == page_number_4d]
-    ends = [m for m in MD_END_RE.finditer(response_text) if m.group(1) == page_number_4d]
+def extract_md(response_text: str, page_number_6d: str) -> str:
+    starts = [m for m in MD_START_RE.finditer(response_text) if m.group(1) == page_number_6d]
+    ends = [m for m in MD_END_RE.finditer(response_text) if m.group(1) == page_number_6d]
 
     if len(starts) != 1 or len(ends) != 1:
         raise ValueError(
-            f"Expected exactly 1 MD_START and 1 MD_END for page={page_number_4d}, "
+            f"Expected exactly 1 MD_START and 1 MD_END for page={page_number_6d}, "
             f"got starts={len(starts)} ends={len(ends)}"
         )
 
     s = starts[0]
     e = ends[0]
     if e.start() <= s.end():
-        raise ValueError(f"Markers out of order for page={page_number_4d}.")
+        raise ValueError(f"Markers out of order for page={page_number_6d}.")
 
     md = response_text[s.end():e.start()].strip("\n")
     return md.strip()
@@ -505,7 +505,7 @@ def md_sanity_check(md: str) -> None:
     if not md.strip():
         raise ValueError("Empty markdown for a non-blank page.")
 
-def llm_convert_page(client_http, image_b64: str, page_number_4d: str) -> Tuple[str, int]:
+def llm_convert_page(client_http, image_b64: str, page_number_6d: str) -> Tuple[str, int]:
     """
     Returns (md, attempts_used).
     Retries on marker/validation failures or truncation (done_reason=length).
@@ -519,7 +519,7 @@ def llm_convert_page(client_http, image_b64: str, page_number_4d: str) -> Tuple[
             {"role": "system", "content": system_prompt()},
             {
                 "role": "user",
-                "content": user_prompt(page_number_4d, attempt),
+                "content": user_prompt(page_number_6d, attempt),
                 "images_b64": [image_b64],
             },
         ]
@@ -584,7 +584,7 @@ def llm_convert_page(client_http, image_b64: str, page_number_4d: str) -> Tuple[
             continue
 
         try:
-            md = extract_md(text, page_number_4d)
+            md = extract_md(text, page_number_6d)
             md_sanity_check(md)
             return md, attempt
         except Exception as e:
@@ -657,14 +657,14 @@ def main() -> None:
             continue
 
         page_number = page_index + 1
-        page_4d = f"{page_number:04d}"
+        page_6d = f"{page_number:06d}"
         print(f"\n[info] Page {page_number}/{page_count}")
 
         img_path, img_hash, w, h = ensure_page_image(doc, page_index)
         print(f"[info] Image: {img_path} ({w}x{h}) sha256={img_hash[:16]}...")
 
         img_b64 = b64_of_file(img_path)
-        md, attempts_used = llm_convert_page(client_http, img_b64, page_4d)
+        md, attempts_used = llm_convert_page(client_http, img_b64, page_6d)
 
         pd = PageDone(
             page_index=page_index,
@@ -685,14 +685,18 @@ def main() -> None:
         # Write per-page markdown file
         write_page_md(page_number, md)
 
-        # Update in-memory and rebuild output.md deterministically
+        # Update in-memory
         completed[page_index] = pd
-        rebuilt = build_output_md(meta, completed)
-        atomic_write_text(OUTPUT_MD_PATH, rebuilt)
 
         print(f"[info] Wrote: {page_md_path(page_number)}")
-        print(f"[info] Wrote: {OUTPUT_MD_PATH} (completed {len(completed)}/{page_count})")
 
+        # Rebuild output.md every 20 pages
+        if len(completed) % 20 == 0:
+            atomic_write_text(OUTPUT_MD_PATH, build_output_md(meta, completed))
+            print(f"[info] Wrote: {OUTPUT_MD_PATH} (completed {len(completed)}/{page_count})")
+
+    # Final rebuild of output.md
+    atomic_write_text(OUTPUT_MD_PATH, build_output_md(meta, completed))
     print("\n[done] Conversion complete.")
     print(f"[done] Output: {OUTPUT_MD_PATH}")
     print(f"[done] Progress: {PROGRESS_PATH}")
